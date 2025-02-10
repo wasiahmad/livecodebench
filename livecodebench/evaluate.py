@@ -9,7 +9,6 @@ def evaluate(
         release_version: str = "release_latest",
 ):
     benchmark = load_code_generation_dataset(release_version)
-    # benchmark = sorted(benchmark, key=lambda x: x.question_id)
 
     custom_outputs = dict()
     with open(custom_output_file, "r") as f:
@@ -22,7 +21,8 @@ def evaluate(
 
     save_results, combined_results = [], []
     for instance in benchmark:
-        custom_output = custom_outputs[instance.question_id]
+        task_id = instance.platform + "_" + instance.question_id
+        custom_output = custom_outputs[task_id]
         output = instance.insert_output(custom_output, custom_output)
         save_results.append(output)
         combined_results.append((custom_output, custom_output))
