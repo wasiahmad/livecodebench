@@ -22,10 +22,10 @@ def evaluate(
     save_results, combined_results = [], []
     for instance in benchmark:
         task_id = instance.platform.value + "_" + instance.question_id
-        custom_output = custom_outputs[task_id]
-        output = instance.insert_output(custom_output, custom_output)
+        code_list = custom_outputs[task_id]["code_list"]
+        output = instance.insert_output(code_list, code_list)
         save_results.append(output)
-        combined_results.append((custom_output, custom_output))
+        combined_results.append((code_list, code_list))
 
     eval_samples = [instance.get_evaluation_sample() for instance in benchmark]
     generations = [extracted for _, extracted in combined_results]
