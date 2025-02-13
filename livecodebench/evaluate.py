@@ -8,13 +8,14 @@ def evaluate(
         custom_output_file: str,
         release_version: str = "release_latest",
 ):
-    benchmark = load_code_generation_dataset(release_version)
-
     custom_outputs = dict()
     with open(custom_output_file, "r") as f:
         for line in f:
             output = json.loads(line)
             custom_outputs[output["question_id"]] = output
+
+    benchmark = load_code_generation_dataset(release_version)
+    benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
 
     assert len(custom_outputs) == len(benchmark), f"{len(custom_outputs)} != {len(benchmark)}"
     assert all(isinstance(custom_output, dict) for custom_output in custom_outputs.values())
