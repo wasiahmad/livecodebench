@@ -22,8 +22,7 @@ def evaluate(
 
     save_results, combined_results = [], []
     for instance in benchmark:
-        task_id = instance.platform.value + "_" + instance.question_id
-        code_list = custom_outputs[task_id]["code_list"]
+        code_list = custom_outputs[instance.question_id]["code_list"]
         output = instance.insert_output(code_list, code_list)
         save_results.append(output)
         combined_results.append((code_list, code_list))
