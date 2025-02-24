@@ -12,7 +12,6 @@ import multiprocessing
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-
 import numpy as np
 from tqdm import tqdm
 
@@ -106,11 +105,11 @@ def evaluate_generations_by_problem(args):
 
 
 def evaluate_generations(
-    samples_list: list,
-    generations_list: list[list[str]],
-    debug: bool = False,
-    num_process_evaluate: int = 16,
-    timeout=6,
+        samples_list: list,
+        generations_list: list[list[str]],
+        debug: bool = False,
+        num_process_evaluate: int = 16,
+        timeout=6,
 ):
     """We take the list of code generations and try to compile them
      and the run their corresponding unit tests which are retrieved from the APPS dataset.
@@ -132,7 +131,7 @@ def evaluate_generations(
 
     with tqdm(total=len(inputs)) as pbar:
         with ProcessPoolExecutor(
-            max_workers=1 if debug else num_process_evaluate
+                max_workers=1 if debug else num_process_evaluate
         ) as executor:
             futures = {
                 executor.submit(evaluate_generations_by_problem, arg): index
@@ -155,21 +154,20 @@ def evaluate_generations(
 
 
 def codegen_metrics(
-    samples_list,
-    generations_list,
-    k_list=[1, 5, 10, 20, 40, 50, 75, 100, 125, 150, 200, 500, 1000],
-    num_process_evaluate=16,
-    timeout=6,
-    debug=False,
+        samples_list,
+        generations_list,
+        k_list=[1, 5, 10, 20, 40, 50, 75, 100, 125, 150, 200, 500, 1000],
+        num_process_evaluate=16,
+        timeout=6,
+        debug=False,
 ):
-
     samples_linear = []
     generations_linear = []
     remap_index = []
     results = defaultdict(list)
     metadatas = defaultdict(list)
     for idx, (sample, generation_list) in enumerate(
-        zip(samples_list, generations_list)
+            zip(samples_list, generations_list)
     ):
         assert isinstance(generation_list, list), generations_list[0]
         for generation in generation_list:

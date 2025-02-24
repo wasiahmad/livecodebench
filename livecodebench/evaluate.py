@@ -53,9 +53,22 @@ def evaluate(
     output_results["date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     for k in metrics[0]:
         if k.startswith("pass@"):
-            print(f"{k}: {metrics[0][k]}")
+            print(f"{k}: {metrics[0][k]:.2f}")
             output_results[k] = metrics[0][k]
-    output_results["eval"] = {r["question_id"]: r for r in save_eval_results}
+
+    output_results["detail_pass@1"] = dict()
+    output_results["eval"] = dict()
+    difficulty_wise_pass_at_1 = dict()
+    for r in save_eval_results:
+        output_results["eval"][r["question_id"]] = r
+        if r["difficulty"] not in difficulty_wise_pass_at_1:
+            difficulty_wise_pass_at_1[r["difficulty"]] = []
+        difficulty_wise_pass_at_1[r["difficulty"]].append(r["pass@1"])
+
+    for tag, v in difficulty_wise_pass_at_1.items():
+        pass_at_1 = sum(v) / len(v)
+        print(f"{tag} pass@1: {pass_at_1}")
+        output_results["detail_pass@1"][tag] = pass_at_1
 
     with open(custom_output_file[:-6] + "_eval_results.json", "w") as f:
         json.dump(output_results, f, indent=4)
