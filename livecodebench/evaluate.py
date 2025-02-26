@@ -53,7 +53,7 @@ def evaluate(
     output_results["date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     for k in metrics[0]:
         if k.startswith("pass@"):
-            print(f"{k}: {metrics[0][k]:.2f}")
+            print(f"{k}: {metrics[0][k]}")
             output_results[k] = metrics[0][k]
 
     output_results["detail_pass@1"] = dict()
