@@ -25,6 +25,7 @@ from decimal import Decimal
 import time
 
 import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
+import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n\n"
 
 
 def truncatefn(s, length=300):
@@ -35,7 +36,7 @@ def truncatefn(s, length=300):
     if len(s) <= length:
         return s
 
-    return s[: length // 2] + "...(truncated) ..." + s[-length // 2 :]
+    return s[: length // 2] + "...(truncated) ..." + s[-length // 2:]
 
 
 class CODE_TYPE(Enum):
@@ -78,7 +79,7 @@ def clean_if_name(code: str) -> str:
             condition = last_block.test
             if ast.unparse(condition).strip() == "__name__ == '__main__'":
                 code = (
-                    ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
+                        ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
                 )
     except:
         pass
@@ -107,11 +108,11 @@ def make_function(code: str) -> str:
             lineno=-1,
         )
         main_code = (
-            import_string
-            + "\n"
-            + ast.unparse(import_stmts)  # type: ignore
-            + "\n"
-            + ast.unparse(function_ast)  # type: ignore
+                import_string
+                + "\n"
+                + ast.unparse(import_stmts)  # type: ignore
+                + "\n"
+                + ast.unparse(function_ast)  # type: ignore
         )
         return main_code
     except Exception as e:
@@ -119,7 +120,6 @@ def make_function(code: str) -> str:
 
 
 def call_method(method, inputs):
-
     if isinstance(inputs, list):
         inputs = "\n".join(inputs)
 
@@ -191,7 +191,7 @@ def get_stripped_lines(val: str):
 
 
 def grade_call_based(
-    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
+        code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
 ):
     # call-based clean up logic
     # need to wrap in try-catch logic after to catch the correct errors, but for now this is fine.
@@ -272,10 +272,10 @@ def grade_call_based(
 
 
 def grade_stdio(
-    code: str,
-    all_inputs: list,
-    all_outputs: list,
-    timeout: int,
+        code: str,
+        all_inputs: list,
+        all_outputs: list,
+        timeout: int,
 ):
     ## runtime doesn't interact well with __name__ == '__main__'
     code = clean_if_name(code)
@@ -351,8 +351,8 @@ def grade_stdio(
             return all_results, WA_send_args
 
         for output_line_idx, (
-            stripped_prediction_line,
-            stripped_gt_out_line,
+                stripped_prediction_line,
+                stripped_gt_out_line,
         ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
             WA_send_args["error_message"] = (
                 f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
