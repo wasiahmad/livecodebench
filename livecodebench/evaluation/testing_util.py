@@ -1,8 +1,12 @@
+import os
 import ast
 import json
 import sys
 import faulthandler
 import platform
+import tempfile
+import shutil
+import subprocess
 
 # used for debugging to time steps
 from datetime import datetime
@@ -25,7 +29,7 @@ from decimal import Decimal
 import time
 
 import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
-import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n\n"
+import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n"
 
 
 def truncatefn(s, length=300):
@@ -165,7 +169,7 @@ def compile_code(code: str, timeout: int):
             # else condition allows future extensibility to other platforms
             compiled_sol = tmp_sol.Solution()
         else:
-            # do nothing in the other case since function is accesible
+            # do nothing in the other case since function is accessible
             compiled_sol = tmp_sol
 
         assert compiled_sol is not None
@@ -173,6 +177,49 @@ def compile_code(code: str, timeout: int):
         signal.alarm(0)
 
     return compiled_sol
+
+
+def compile_cpp_code(code: str, timeout: int):
+    temp_dir = tempfile.mkdtemp()
+    cpp_file_path = os.path.join(temp_dir, "solution.cpp")
+    executable_path = os.path.join(temp_dir, "solution")
+    compiled_successfully = False
+
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout)
+
+    try:
+        with open(cpp_file_path, "w") as f:
+            f.write(code)
+
+        # Compile the C++ code
+        compile_process = subprocess.run(
+            ["g++", cpp_file_path, "-o", executable_path],
+            capture_output=True,
+            text=True,
+            check=False  # Don't raise an exception on non-zero exit code
+        )
+
+        if compile_process.returncode == 0:
+            compiled_successfully = True
+            return temp_dir
+        else:
+            return None
+
+    except TimeoutError:
+        print(f"Compilation timed out after {timeout} seconds.")
+        return None
+
+    except Exception as e:
+        return None
+
+    finally:
+        signal.alarm(0)
+        if not compiled_successfully and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except OSError as e:
+                print(f"Warning: Could not remove directory {temp_dir}: {e}")
 
 
 def convert_line_to_decimals(line: str) -> tuple[bool, list[Decimal]]:
@@ -267,6 +314,107 @@ def grade_call_based(
         finally:
             signal.alarm(0)
             faulthandler.disable()
+
+    return all_results, {"execution time": total_execution}
+
+
+def grade_call_based_cpp(
+        code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
+):
+    assert len(all_inputs) == 1 and len(all_outputs) == 1 and all_outputs[0] == ""
+    code = import_string_cpp + "\n\n" + code + "\n\n" + all_inputs[0]
+    temp_dir = compile_cpp_code(code, timeout)
+    if temp_dir is None:
+        return [False], {
+            "error_code": -1,
+            "error_message": "Compilation failed"
+        }
+
+    executable_path = f"{temp_dir}/solution"
+    all_results = []
+    total_execution = 0
+    signal.signal(signal.SIGALRM, timeout_handler)
+
+    try:
+        signal.alarm(timeout)
+        faulthandler.enable()
+        start_time = time.time()
+
+        max_memory_bytes = 8 * (1024 ** 3)
+        process = subprocess.run(
+            [executable_path],
+            capture_output=False,  # we don't need stdout and stderr
+            text=True,
+            check=False,  # Do not raise exception on non-zero exit
+            preexec_fn=lambda: set_memory_limit(max_memory_bytes),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        # max memory is set to 8GB
+        # max_memory_bytes = 8 * (1024 ** 3)
+        # process = subprocess.Popen(
+        #     [executable_path],
+        #     stdin=subprocess.PIPE,
+        #     stdout=subprocess.PIPE,
+        #     stderr=subprocess.PIPE,
+        #     text=True,
+        #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
+        # )
+        # stdout, stderr = process.communicate()
+
+        end_time = time.time()
+        total_execution += end_time - start_time
+        signal.alarm(0)
+
+        if process.returncode == 0:
+            all_results.append(True)
+        else:
+            all_results.append(-2)
+            return all_results, {
+                "error_code": -2,
+                "error_message": "Wrong Answer"
+            }
+
+    except TimeoutError as e:
+        signal.alarm(0)
+        all_results.append(-3)
+        return all_results, {
+            "error": repr(e),
+            "error_code": -3,
+            "error_message": "Time Limit Exceeded"
+        }
+
+    except MemoryError as e:
+        signal.alarm(0)
+        all_results.append(-5)
+        return all_results, {
+            "error": repr(e),
+            "error_code": -5,
+            "error_message": "Memory Limit Exceeded"
+        }
+
+    except Exception as e:
+        all_results.append(-4)
+        return all_results, {
+            "error": repr(e),
+            "error_code": -4,
+            "error_message": "Runtime Error"
+        }
+
+    finally:
+        signal.alarm(0)
+        faulthandler.disable()
+        if os.path.exists(executable_path):
+            try:
+                os.remove(executable_path)
+            except OSError as e:
+                print(f"Warning: Could not remove executable {executable_path}: {e}")
+        if os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except OSError as e:
+                print(f"Warning: Could not remove directory {temp_dir}: {e}")
 
     return all_results, {"execution time": total_execution}
 
@@ -389,6 +537,115 @@ def grade_stdio(
     return all_results, {"execution time": total_execution_time}
 
 
+def grade_stdio_cpp(
+        code: str,
+        all_inputs: list,
+        all_outputs: list,
+        timeout: int,
+):
+    temp_dir = compile_cpp_code(code, timeout)
+    if temp_dir is None:
+        return [False], {
+            "error_code": -1,
+            "error_message": "Compilation failed"
+        }
+
+    executable_path = f"{temp_dir}/solution"
+    all_results = []
+    total_execution_time = 0.0
+    signal.signal(signal.SIGALRM, timeout_handler)
+
+    try:
+        signal.alarm(timeout)
+        faulthandler.enable()
+        for i, input_str in enumerate(all_inputs):
+            expected_output = all_outputs[i].strip()
+            try:
+                start_time = time.time()
+
+                # max memory is set to 8GB
+                max_memory_bytes = 8 * (1024 ** 3)
+                process = subprocess.run(
+                    [executable_path],
+                    input=input_str,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    preexec_fn=lambda: set_memory_limit(max_memory_bytes)
+                )
+                actual_output = process.stdout.strip()
+
+                # max memory is set to 8GB
+                # max_memory_bytes = 8 * (1024 ** 3)
+                # process = subprocess.Popen(
+                #     [executable_path],
+                #     stdin=subprocess.PIPE,
+                #     stdout=subprocess.PIPE,
+                #     stderr=subprocess.PIPE,
+                #     text=True,
+                #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
+                # )
+                # process.stdin.write(input_str)
+                # process.stdin.close()
+                # stdout, stderr = process.communicate()
+                # actual_output = stdout.strip()
+
+                end_time = time.time()
+                execution_time = end_time - start_time
+                total_execution_time += execution_time
+                signal.alarm(0)
+
+                has_passed = True if actual_output == expected_output else False
+                all_results.append(has_passed)
+                if not has_passed:
+                    return all_results, {
+                        "error_code": -2,
+                        "error_message": "Wrong Answer"
+                    }
+
+            except TimeoutError as e:
+                signal.alarm(0)
+                all_results.append(-3)
+                return all_results, {
+                    "error": repr(e),
+                    "error_code": -3,
+                    "error_message": "Time Limit Exceeded"
+                }
+
+            except MemoryError as e:
+                signal.alarm(0)
+                all_results.append(-5)
+                return all_results, {
+                    "error": repr(e),
+                    "error_code": -5,
+                    "error_message": "Memory Limit Exceeded"
+                }
+
+            except Exception as e:
+                all_results.append(-4)
+                return all_results, {
+                    "error": repr(e),
+                    "error_code": -4,
+                    "error_message": "Runtime Error"
+                }
+
+        return all_results, {"execution time": total_execution_time}
+
+    finally:
+        signal.alarm(0)
+        faulthandler.disable()
+        if os.path.exists(executable_path):
+            try:
+                os.remove(executable_path)
+            except OSError as e:
+                print(f"Warning: Could not remove executable {executable_path}: {e}")
+        if os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except OSError as e:
+                print(f"Warning: Could not remove directory {temp_dir}: {e}")
+
+
 def run_test(sample, test=None, debug=False, timeout=6):
     """
     if test(generated_code) is not None it'll try to run the code.
@@ -424,6 +681,7 @@ def run_test(sample, test=None, debug=False, timeout=6):
     if test is None:
         assert False, "should not happen: test code is none"
         return in_outs, {"error": "no test code provided"}
+
     elif test is not None:
         results = []
         sol = import_string
@@ -448,6 +706,7 @@ def run_test(sample, test=None, debug=False, timeout=6):
                 }
             finally:
                 signal.alarm(0)
+
         elif which_type == CODE_TYPE.standard_input:
             # sol
             # if code has if __name__ == "__main__": then remove it
@@ -465,6 +724,80 @@ def run_test(sample, test=None, debug=False, timeout=6):
                 return [-4], {
                     "error_code": -4,
                     "error_message": f"Error during testing: {e}",
+                }
+            finally:
+                signal.alarm(0)
+
+
+def run_test_cpp(sample, test=None, debug=False, timeout=30):
+    """
+    if test(generated_code) is not None it'll try to run the code.
+    otherwise it'll just return an input and output pair.
+    """
+    signal.signal(signal.SIGALRM, timeout_handler)
+
+    if debug:
+        print(f"start = {datetime.now().time()}")
+
+    try:
+        in_outs = json.loads(sample["input_output"])
+    except ValueError as e:
+        raise e
+        in_outs = None
+
+    if in_outs:
+        if in_outs.get("fn_name") is None:
+            which_type = CODE_TYPE.standard_input  # Standard input
+            method_name = None
+
+        else:
+            which_type = CODE_TYPE.call_based  # Call-based
+            method_name = in_outs["fn_name"]
+
+    if debug:
+        print(f"loaded input_output = {datetime.now().time()}")
+
+    if test is None:
+        assert False, "should not happen: test code is none"
+        return in_outs, {"error": "no test code provided"}
+
+    elif test is not None:
+        if debug:
+            print(f"loading test code = {datetime.now().time()}")
+
+        if which_type == CODE_TYPE.call_based:
+            signal.alarm(timeout)
+            try:
+                results, metadata = grade_call_based_cpp(
+                    code=test,
+                    all_inputs=in_outs["inputs"],
+                    all_outputs=in_outs["outputs"],
+                    fn_name=method_name,
+                    timeout=timeout,
+                )
+                return results, metadata
+            except Exception as e:
+                return [-4], {
+                    "error_code": -4,
+                    "error_message": f"Error during testing: {e}"
+                }
+            finally:
+                signal.alarm(0)
+
+        elif which_type == CODE_TYPE.standard_input:
+            signal.alarm(timeout)
+            try:
+                results, metadata = grade_stdio_cpp(
+                    code=test,
+                    all_inputs=in_outs["inputs"],
+                    all_outputs=in_outs["outputs"],
+                    timeout=timeout,
+                )
+                return results, metadata
+            except Exception as e:
+                return [-4], {
+                    "error_code": -4,
+                    "error_message": f"Error during testing: {e}"
                 }
             finally:
                 signal.alarm(0)
@@ -554,3 +887,19 @@ def reliability_guard(maximum_memory_bytes=None):
     sys.modules["resource"] = None
     sys.modules["psutil"] = None
     sys.modules["tkinter"] = None
+
+
+def set_memory_limit(maximum_memory_bytes):
+    assert maximum_memory_bytes is not None
+    import resource
+
+    resource.setrlimit(
+        resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes)
+    )
+    resource.setrlimit(
+        resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes)
+    )
+    if not platform.uname().system == "Darwin":
+        resource.setrlimit(
+            resource.RLIMIT_STACK, (maximum_memory_bytes, maximum_memory_bytes)
+        )

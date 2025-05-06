@@ -15,17 +15,20 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from tqdm import tqdm
 
-from livecodebench.evaluation.testing_util import run_test
+from livecodebench.evaluation.testing_util import run_test, run_test_cpp
 from livecodebench.evaluation.pass_k_utils import compute_metrics_from_results
 
 
-def _temp_run(sample, generation, debug, result, metadata_list, timeout):
-    res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
+def _temp_run(sample, generation, debug, result, metadata_list, timeout, language):
+    if language == "cpp":
+        res, metadata = run_test_cpp(sample, test=generation, debug=debug, timeout=timeout)
+    else:
+        res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
     result.append(res)
     metadata_list.append(metadata)
 
 
-def check_correctness(sample, generation, timeout, debug=True):
+def check_correctness(sample, generation, timeout, debug=True, language="python"):
     """Check correctness of code generation with a global timeout.
     The global timeout is to catch some extreme/rare cases not handled by the timeouts
     inside `run_test`"""
@@ -35,7 +38,7 @@ def check_correctness(sample, generation, timeout, debug=True):
     metadata_list = manager.list()
     p = multiprocessing.Process(
         target=_temp_run,
-        args=(sample, generation, debug, result, metadata_list, timeout),
+        args=(sample, generation, debug, result, metadata_list, timeout, language),
     )
     p.start()
     p.join(
@@ -49,6 +52,7 @@ def check_correctness(sample, generation, timeout, debug=True):
         result = [[-1 for i in range(len(in_outs["inputs"]))]]
         if debug:
             print(f"global timeout")
+
     return result[0], metadata_list[0]
 
 
@@ -57,51 +61,95 @@ def evaluate_generations_by_problem(args):
     sample = args[1]
     debug: bool = args[2]
     timeout: int = args[3]
+    language: str = args[4]
 
-    res = []
-    metadata = []
-    for o_idx, o in enumerate(problem_generations):
-        curr_res = [-2]
-        try:
-            curr_res, curr_metadata = check_correctness(
-                sample, o, timeout=timeout, debug=debug
-            )
-            if debug:
-                print(f"\nSuccessful compilation of task {o_idx}!")
-            fixed = []
-            for e in curr_res:
-                if isinstance(e, np.ndarray):
-                    e = e.item(0)
-                if isinstance(e, np.bool_):
-                    e = bool(e)
-                fixed.append(e)
-            curr_res = fixed
-            if not np.all(curr_res):
+    if language == "python":
+        res = []
+        metadata = []
+        for o_idx, o in enumerate(problem_generations):
+            curr_res = [-2]
+            try:
+                curr_res, curr_metadata = check_correctness(
+                    sample, o, timeout=timeout, debug=debug
+                )
                 if debug:
-                    print(f"Results were not True for all test cases {curr_res=}\n")
-        except Exception as e:
-            if debug:
-                print(f"Compilation failed, test framework exception = {repr(e)}{e}\n")
-            # break
-            curr_metadata = {
-                "error": repr(e),
-                "error_code": -5,
-                "error_message": "TestRunnerError",
-            }
-        finally:
-            assert isinstance(curr_res, list), curr_res
-            assert isinstance(curr_metadata, dict), curr_metadata
-            res.append(curr_res)
-            metadata.append(curr_metadata)
-    if debug:
-        for i, r in enumerate(problem_generations):
-            print("Sample\n")
-            print(r)
-            print("\n")
-            print("Result\n")
-            print(res[i])
-            print("*" * 30 + "\n\n")
-    return res, metadata
+                    print(f"\nSuccessful compilation of task {o_idx}!")
+                fixed = []
+                for e in curr_res:
+                    if isinstance(e, np.ndarray):
+                        e = e.item(0)
+                    if isinstance(e, np.bool_):
+                        e = bool(e)
+                    fixed.append(e)
+                curr_res = fixed
+                if not np.all(curr_res):
+                    if debug:
+                        print(f"Results were not True for all test cases {curr_res=}\n")
+            except Exception as e:
+                if debug:
+                    print(f"Compilation failed, test framework exception = {repr(e)}{e}\n")
+                # break
+                curr_metadata = {
+                    "error": repr(e),
+                    "error_code": -5,
+                    "error_message": "TestRunnerError",
+                }
+            finally:
+                assert isinstance(curr_res, list), curr_res
+                assert isinstance(curr_metadata, dict), curr_metadata
+                res.append(curr_res)
+                metadata.append(curr_metadata)
+
+        if debug:
+            for i, r in enumerate(problem_generations):
+                print("Sample\n")
+                print(r)
+                print("\n")
+                print("Result\n")
+                print(res[i])
+                print("*" * 30 + "\n\n")
+
+        # print("==" * 20)
+        # print(res)
+        # print(metadata)
+        return res, metadata
+
+    elif language == "cpp":
+        res = []
+        metadata = []
+        for o_idx, o in enumerate(problem_generations):
+            curr_res = [-2]
+            try:
+                curr_res, curr_metadata = check_correctness(
+                    sample, o, timeout=timeout, debug=debug, language=language
+                )
+                if debug:
+                    print(f"\nSuccessful compilation of task {o_idx}!")
+            except Exception as e:
+                if debug:
+                    print(f"Compilation failed, test framework exception = {repr(e)}{e}\n")
+                # break
+                curr_metadata = {
+                    "error": repr(e),
+                    "error_code": -5,
+                    "error_message": "TestRunnerError",
+                }
+            finally:
+                assert isinstance(curr_res, list), curr_res
+                assert isinstance(curr_metadata, dict), curr_metadata
+                res.append(curr_res)
+                metadata.append(curr_metadata)
+
+        if debug:
+            for i, r in enumerate(problem_generations):
+                print("Sample\n")
+                print(r)
+                print("\n")
+                print("Result\n")
+                print(res[i])
+                print("*" * 30 + "\n\n")
+
+        return res, metadata
 
 
 def evaluate_generations(
@@ -110,6 +158,7 @@ def evaluate_generations(
         debug: bool = False,
         num_process_evaluate: int = 16,
         timeout=6,
+        language="python"
 ):
     """We take the list of code generations and try to compile them
      and the run their corresponding unit tests which are retrieved from the APPS dataset.
@@ -125,7 +174,7 @@ def evaluate_generations(
     # generations are code generations in the same order of the dataset
 
     inputs = [
-        [(generations_list[index], samples_list[index], debug, timeout), index]
+        [(generations_list[index], samples_list[index], debug, timeout, language), index]
         for index in range(len(generations_list))
     ]
 
@@ -160,6 +209,7 @@ def codegen_metrics(
         num_process_evaluate=16,
         timeout=6,
         debug=False,
+        language="python"
 ):
     samples_linear = []
     generations_linear = []
@@ -171,7 +221,10 @@ def codegen_metrics(
     ):
         assert isinstance(generation_list, list), generations_list[0]
         for generation in generation_list:
-            assert isinstance(generation, str), generations_list[0]
+            if generation is None:
+                generation = ""
+            else:
+                assert isinstance(generation, str), (idx, generation)
             samples_linear.append(sample)
             generations_linear.append([generation])
             remap_index.append(idx)
@@ -184,6 +237,7 @@ def codegen_metrics(
         debug=debug,
         num_process_evaluate=num_process_evaluate,
         timeout=timeout,
+        language=language
     )
 
     for idx, sub_results in sorted(results_linear.items(), key=lambda x: x[0]):
@@ -245,5 +299,6 @@ if __name__ == "__main__":
             "\nMOD = 998244353\n\nS = input().strip()\nn = len(S)\n\nif n % 2 != 0:\n    print(0)\n    exit()\n\n# Initialize DP table\ndp = [[0] * (n + 2) for _ in range(n + 1)]\ndp[0][0] = 1\n\nfor i in range(1, n + 1):\n    c = S[i-1]\n    for b in range(n + 1):\n        if dp[i-1][b] == 0:\n            continue\n        if c == '(':\n            new_b = b + 1\n            if new_b <= n:\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n        elif c == ')':\n            if b > 0:\n                new_b = b - 1\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n        else:  # '?'\n            # Replace with '('\n            new_b = b + 1\n            if new_b <= n:\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n            # Replace with ')'\n            if b > 0:\n                new_b = b - 1\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n\nprint(dp[n][0] % MOD)\n",
             6,
             debug=True,
+            language="python"
         )
     )

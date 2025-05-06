@@ -1,22 +1,37 @@
 import json
 from datetime import datetime
-from livecodebench.benchmarks import load_code_generation_dataset
+from livecodebench.benchmarks import (
+    load_code_generation_dataset,
+    load_code_generation_dataset_from_file
+)
 from livecodebench.evaluation import extract_instance_results, codegen_metrics
 
 
 def evaluate(
         custom_output_file: str,
         release_version: str = "release_latest",
+        k_list=[1],
+        language: str = "python",
+        test_file: str = None,
+        num_process_evaluate: int = 12,
+        debug: bool = False,
+        timeout: int = 6
 ):
     custom_outputs = dict()
     with open(custom_output_file, "r") as f:
         for line in f:
             output = json.loads(line)
+            if "question_id" not in output:
+                assert "task_id" in output
+                output["question_id"] = output.pop("task_id")
             custom_outputs[output["question_id"]] = output
 
-    benchmark = load_code_generation_dataset(release_version)
-    benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
+    if test_file:
+        benchmark = load_code_generation_dataset_from_file(test_file, language)
+    else:
+        benchmark = load_code_generation_dataset(release_version)
 
+    benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
     assert len(custom_outputs) == len(benchmark), f"{len(custom_outputs)} != {len(benchmark)}"
     assert all(isinstance(custom_output, dict) for custom_output in custom_outputs.values())
 
@@ -29,11 +44,15 @@ def evaluate(
 
     eval_samples = [instance.get_evaluation_sample() for instance in benchmark]
     generations = [extracted for _, extracted in combined_results]
+
     metrics = codegen_metrics(
         eval_samples,
         generations,
-        num_process_evaluate=12,
-        timeout=6,
+        k_list=k_list,
+        num_process_evaluate=num_process_evaluate,
+        timeout=timeout,
+        debug=debug,
+        language=language
     )
 
     graded = extract_instance_results(metrics[1])

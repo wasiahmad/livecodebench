@@ -52,14 +52,18 @@ class CodeGenerationProblem:
     public_test_cases: list[Test]
     private_test_cases: list[Test]
     metadata: dict
+    language: str
 
     def __post_init__(self):
         self.platform = Platform(self.platform)
         self.difficulty = Difficulty(self.difficulty)
         self.contest_date = datetime.fromisoformat(self.contest_date)
 
-        self.public_test_cases = json.loads(self.public_test_cases)  # type: ignore
-        self.public_test_cases = [Test(**t) for t in self.public_test_cases]
+        if self.public_test_cases:
+            self.public_test_cases = json.loads(self.public_test_cases)  # type: ignore
+            self.public_test_cases = [Test(**t) for t in self.public_test_cases]
+        else:
+            self.public_test_cases = []
 
         try:
             self.private_test_cases = json.loads(self.private_test_cases)  # type: ignore
@@ -87,14 +91,15 @@ class CodeGenerationProblem:
             "difficulty": self.difficulty.value,
             "output_list": output_list,
             "code_list": code_list,
+            "language": self.language,
         }
 
     def insert_output_evaluation(
-        self,
-        output_list: list[str],
-        code_list: list[str],
-        graded_list: list[bool],
-        **kwargs,
+            self,
+            output_list: list[str],
+            code_list: list[str],
+            graded_list: list[bool],
+            **kwargs,
     ) -> dict:
         output = self.insert_output(output_list, code_list)
         output["graded_list"] = graded_list
@@ -122,15 +127,31 @@ class CodeGenerationProblem:
 
 
 def load_code_generation_dataset(release_version="release_v1") -> list[CodeGenerationProblem]:
-    dataset = load_dataset("livecodebench/code_generation_lite", split="test", version_tag=release_version, trust_remote_code=True)
-    dataset = [CodeGenerationProblem(**p) for p in dataset]  # type: ignore
+    dataset = load_dataset(
+        "livecodebench/code_generation_lite", split="test", version_tag=release_version,
+        trust_remote_code=True
+    )
+    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
 
 def load_code_generation_dataset_not_fast(release_version="release_v1") -> list[CodeGenerationProblem]:
     dataset = load_dataset("livecodebench/code_generation", split="test")
-    dataset = [CodeGenerationProblem(**p) for p in dataset]  # type: ignore
+    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
+    print(f"Loaded {len(dataset)} problems")
+    return dataset
+
+
+def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
+    dataset = []
+    with open(filepath, "r") as f:
+        for line in f:
+            p = json.loads(line)
+            if "task_id" in p:
+                assert "question_id" not in p
+                p["question_id"] = p.pop("task_id")
+            dataset.append(CodeGenerationProblem(**p, language=language))
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
