@@ -9,7 +9,6 @@ from livecodebench.evaluation import extract_instance_results, codegen_metrics
 def evaluate(
         custom_output_file: str,
         test_file: str,
-        release_version: str = "release_latest",
         k_list=[1],
         language: str = "python",
         num_process_evaluate: int = 12,

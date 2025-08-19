@@ -24,7 +24,6 @@ import platform
 import signal
 import tempfile
 
-
 BASE_IMPORTS = """from itertools import accumulate, chain, combinations, count, permutations, product, groupby, islice, repeat
 from copy import deepcopy
 from string import ascii_lowercase
@@ -61,6 +60,7 @@ from operator import iand
 import sys
 """
 
+
 def check_correctness(check_program, timeout=3):
     """
     Evaluates the functional correctness of a completion by running the test
@@ -85,7 +85,6 @@ def check_correctness(check_program, timeout=3):
 
 
 def unsafe_execute(check_program, result, timeout):
-
     with create_tempdir():
 
         # These system calls are needed when cleaning up tempdir.
@@ -256,7 +255,7 @@ def reliability_guard(maximum_memory_bytes=None):
 
     subprocess.Popen = None  # type: ignore
 
-    __builtins__["help"] = None
+    __builtins__.help = None
 
     import sys
 
