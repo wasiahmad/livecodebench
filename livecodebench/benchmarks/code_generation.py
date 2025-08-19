@@ -4,10 +4,7 @@ import pickle
 import base64
 from enum import Enum
 from datetime import datetime
-from dataclasses import dataclass
-
-
-# from datasets import load_dataset
+from dataclasses import dataclass, fields
 
 
 class Platform(Enum):
@@ -127,35 +124,17 @@ class CodeGenerationProblem:
         }
 
 
-# def load_code_generation_dataset(release_version="release_v1") -> list[CodeGenerationProblem]:
-#     dataset = load_dataset(
-#         "livecodebench/code_generation_lite", split="test", version_tag=release_version,
-#         trust_remote_code=True
-#     )
-#     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
-#     print(f"Loaded {len(dataset)} problems")
-#     return dataset
-#
-#
-# def load_code_generation_dataset_not_fast(release_version="release_v1") -> list[CodeGenerationProblem]:
-#     dataset = load_dataset("livecodebench/code_generation", split="test")
-#     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
-#     print(f"Loaded {len(dataset)} problems")
-#     return dataset
-
-
 def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
     dataset = []
+    valid_keys = {f.name for f in fields(CodeGenerationProblem)}
     with open(filepath, "r") as f:
         for line in f:
             p = json.loads(line)
             if "task_id" in p:
                 assert "question_id" not in p
                 p["question_id"] = p.pop("task_id")
-            dataset.append(CodeGenerationProblem(**p, language=language))
+            filtered_p = {key: value for key, value in p.items() if key in valid_keys}
+            problem = CodeGenerationProblem(**filtered_p, language=language)
+            dataset.append(problem)
     print(f"Loaded {len(dataset)} problems")
     return dataset
-
-
-if __name__ == "__main__":
-    dataset = load_code_generation_dataset()
