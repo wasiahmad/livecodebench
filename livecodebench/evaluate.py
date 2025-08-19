@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from livecodebench.benchmarks import (
-    load_code_generation_dataset,
+    # load_code_generation_dataset,
     load_code_generation_dataset_from_file
 )
 from livecodebench.evaluation import extract_instance_results, codegen_metrics
