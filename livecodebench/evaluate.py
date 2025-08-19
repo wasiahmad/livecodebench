@@ -9,10 +9,10 @@ from livecodebench.evaluation import extract_instance_results, codegen_metrics
 
 def evaluate(
         custom_output_file: str,
+        test_file: str,
         release_version: str = "release_latest",
         k_list=[1],
         language: str = "python",
-        test_file: str = None,
         num_process_evaluate: int = 12,
         debug: bool = False,
         timeout: int = 6
@@ -26,19 +26,7 @@ def evaluate(
                 output["question_id"] = output.pop("task_id")
             custom_outputs[output["question_id"]] = output
 
-    if test_file:
-        benchmark = load_code_generation_dataset_from_file(test_file, language)
-    else:
-        try:
-            from datasets import load_dataset
-        except (ImportError, ModuleNotFoundError):
-            raise ImportError(
-                "The 'datasets' library is required to load benchmarks from the hub.\n"
-                "Please install it with 'pip install datasets' or provide a local "
-                "path via the '--test_file' argument."
-            )
-        benchmark = load_code_generation_dataset(release_version)
-
+    benchmark = load_code_generation_dataset_from_file(test_file, language)
     benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
     assert len(custom_outputs) == len(benchmark), f"{len(custom_outputs)} != {len(benchmark)}"
     assert all(isinstance(custom_output, dict) for custom_output in custom_outputs.values())

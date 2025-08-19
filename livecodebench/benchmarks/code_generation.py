@@ -6,7 +6,8 @@ from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass
 
-from datasets import load_dataset
+
+# from datasets import load_dataset
 
 
 class Platform(Enum):
@@ -126,21 +127,21 @@ class CodeGenerationProblem:
         }
 
 
-def load_code_generation_dataset(release_version="release_v1") -> list[CodeGenerationProblem]:
-    dataset = load_dataset(
-        "livecodebench/code_generation_lite", split="test", version_tag=release_version,
-        trust_remote_code=True
-    )
-    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
-    print(f"Loaded {len(dataset)} problems")
-    return dataset
-
-
-def load_code_generation_dataset_not_fast(release_version="release_v1") -> list[CodeGenerationProblem]:
-    dataset = load_dataset("livecodebench/code_generation", split="test")
-    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
-    print(f"Loaded {len(dataset)} problems")
-    return dataset
+# def load_code_generation_dataset(release_version="release_v1") -> list[CodeGenerationProblem]:
+#     dataset = load_dataset(
+#         "livecodebench/code_generation_lite", split="test", version_tag=release_version,
+#         trust_remote_code=True
+#     )
+#     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
+#     print(f"Loaded {len(dataset)} problems")
+#     return dataset
+#
+#
+# def load_code_generation_dataset_not_fast(release_version="release_v1") -> list[CodeGenerationProblem]:
+#     dataset = load_dataset("livecodebench/code_generation", split="test")
+#     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
+#     print(f"Loaded {len(dataset)} problems")
+#     return dataset
 
 
 def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
