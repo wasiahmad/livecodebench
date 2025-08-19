@@ -29,6 +29,14 @@ def evaluate(
     if test_file:
         benchmark = load_code_generation_dataset_from_file(test_file, language)
     else:
+        try:
+            from datasets import load_dataset
+        except (ImportError, ModuleNotFoundError):
+            raise ImportError(
+                "The 'datasets' library is required to load benchmarks from the hub.\n"
+                "Please install it with 'pip install datasets' or provide a local "
+                "path via the '--test_file' argument."
+            )
         benchmark = load_code_generation_dataset(release_version)
 
     benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
