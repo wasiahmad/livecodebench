@@ -1,16 +1,12 @@
 import json
 from datetime import datetime
-from livecodebench.benchmarks import (
-    load_code_generation_dataset_from_file
-)
+from livecodebench.benchmarks import load_code_generation_dataset
 from livecodebench.evaluation import extract_instance_results, codegen_metrics
 
 
 def evaluate(
         custom_output_file: str,
-        test_file: str,
         k_list=[1],
-        language: str = "python",
         num_process_evaluate: int = 12,
         debug: bool = False,
         timeout: int = 6
@@ -24,7 +20,7 @@ def evaluate(
                 output["question_id"] = output.pop("task_id")
             custom_outputs[output["question_id"]] = output
 
-    benchmark = load_code_generation_dataset_from_file(test_file, language)
+    benchmark = load_code_generation_dataset()
     benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
     assert len(custom_outputs) == len(benchmark), f"{len(custom_outputs)} != {len(benchmark)}"
     assert all(isinstance(custom_output, dict) for custom_output in custom_outputs.values())
@@ -45,8 +41,7 @@ def evaluate(
         k_list=k_list,
         num_process_evaluate=num_process_evaluate,
         timeout=timeout,
-        debug=debug,
-        language=language
+        debug=debug
     )
 
     graded = extract_instance_results(metrics[1])
@@ -69,19 +64,9 @@ def evaluate(
             print(f"{k}: {metrics[0][k]}")
             output_results[k] = metrics[0][k]
 
-    output_results["detail_pass@1"] = dict()
     output_results["eval"] = dict()
-    difficulty_wise_pass_at_1 = dict()
     for r in save_eval_results:
         output_results["eval"][r["question_id"]] = r
-        if r["difficulty"] not in difficulty_wise_pass_at_1:
-            difficulty_wise_pass_at_1[r["difficulty"]] = []
-        difficulty_wise_pass_at_1[r["difficulty"]].append(r["pass@1"])
-
-    for tag, v in difficulty_wise_pass_at_1.items():
-        pass_at_1 = sum(v) / len(v)
-        print(f"{tag} pass@1: {pass_at_1}")
-        output_results["detail_pass@1"][tag] = pass_at_1
 
     with open(custom_output_file[:-6] + "_eval_results.json", "w") as f:
         json.dump(output_results, f, indent=4)

@@ -3,20 +3,8 @@ import zlib
 import pickle
 import base64
 from enum import Enum
-from datetime import datetime
+from datasets import load_dataset
 from dataclasses import dataclass, fields
-
-
-class Platform(Enum):
-    LEETCODE = "leetcode"
-    CODEFORCES = "codeforces"
-    ATCODER = "atcoder"
-
-
-class Difficulty(Enum):
-    EASY = "easy"
-    MEDIUM = "medium"
-    HARD = "hard"
 
 
 class TestType(Enum):
@@ -32,31 +20,16 @@ class Test:
 
     def __post_init__(self):
         self.testtype = TestType(self.testtype)
-        # if self.testtype == TestType.FUNCTIONAL:
-        #     self.input = json.loads(self.input)
-        #     self.output = json.loads(self.output)
 
 
 @dataclass
 class CodeGenerationProblem:
-    question_title: str
-    question_content: str
-    platform: Platform
     question_id: str
-    contest_id: str
-    contest_date: datetime
-    starter_code: str
-    difficulty: Difficulty
+    task: str
     public_test_cases: list[Test]
     private_test_cases: list[Test]
-    metadata: dict
-    language: str
 
     def __post_init__(self):
-        self.platform = Platform(self.platform)
-        self.difficulty = Difficulty(self.difficulty)
-        self.contest_date = datetime.fromisoformat(self.contest_date)
-
         if self.public_test_cases:
             self.public_test_cases = json.loads(self.public_test_cases)  # type: ignore
             self.public_test_cases = [Test(**t) for t in self.public_test_cases]
@@ -79,17 +52,10 @@ class CodeGenerationProblem:
 
     def insert_output(self, output_list: list[str], code_list: list[str]) -> dict:
         return {
-            "question_title": self.question_title,
-            "question_content": self.question_content,
-            "platform": self.platform.value,
             "question_id": self.question_id,
-            "contest_id": self.contest_id,
-            "contest_date": self.contest_date.isoformat(),
-            "starter_code": self.starter_code,
-            "difficulty": self.difficulty.value,
+            "task": self.task,
             "output_list": output_list,
-            "code_list": code_list,
-            "language": self.language,
+            "code_list": code_list
         }
 
     def insert_output_evaluation(
@@ -124,17 +90,13 @@ class CodeGenerationProblem:
         }
 
 
-def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
-    dataset = []
+def load_code_generation_dataset() -> list[CodeGenerationProblem]:
+    dataset = load_dataset("livebench/coding", split="test", trust_remote_code=True)
     valid_keys = {f.name for f in fields(CodeGenerationProblem)}
-    with open(filepath, "r") as f:
-        for line in f:
-            p = json.loads(line)
-            if "task_id" in p:
-                assert "question_id" not in p
-                p["question_id"] = p.pop("task_id")
-            filtered_p = {key: value for key, value in p.items() if key in valid_keys}
-            problem = CodeGenerationProblem(**filtered_p, language=language)
-            dataset.append(problem)
-    print(f"Loaded {len(dataset)} problems")
-    return dataset
+    filtered_dataset = []
+    for p in dataset:
+        filtered_p = {key: value for key, value in p.items() if key in valid_keys}
+        problem = CodeGenerationProblem(**filtered_p)
+        filtered_dataset.append(problem)
+    print(f"Loaded {len(filtered_dataset)} problems")
+    return filtered_dataset
