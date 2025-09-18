@@ -28,6 +28,7 @@ class CodeGenerationProblem:
     task: str
     public_test_cases: list[Test]
     private_test_cases: list[Test]
+    metadata: dict
 
     def __post_init__(self):
         if self.public_test_cases:
@@ -95,7 +96,9 @@ def load_code_generation_dataset() -> list[CodeGenerationProblem]:
     valid_keys = {f.name for f in fields(CodeGenerationProblem)}
     filtered_dataset = []
     for p in dataset:
-        filtered_p = {key: value for key, value in p.items() if key in valid_keys}
+        filtered_p = dict()
+        for key in valid_keys:
+            filtered_p[key] = p["original_json"]["metadata"] if key == "metadata" else p[key]
         problem = CodeGenerationProblem(**filtered_p)
         filtered_dataset.append(problem)
     print(f"Loaded {len(filtered_dataset)} problems")
