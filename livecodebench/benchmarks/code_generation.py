@@ -1,10 +1,10 @@
-import json
-import zlib
-import pickle
 import base64
-from enum import Enum
-from datetime import datetime
+import json
+import pickle
+import zlib
 from dataclasses import dataclass, fields
+from datetime import datetime
+from enum import Enum
 
 
 class Platform(Enum):
@@ -93,11 +93,11 @@ class CodeGenerationProblem:
         }
 
     def insert_output_evaluation(
-            self,
-            output_list: list[str],
-            code_list: list[str],
-            graded_list: list[bool],
-            **kwargs,
+        self,
+        output_list: list[str],
+        code_list: list[str],
+        graded_list: list[bool],
+        **kwargs,
     ) -> dict:
         output = self.insert_output(output_list, code_list)
         output["graded_list"] = graded_list
@@ -124,14 +124,16 @@ class CodeGenerationProblem:
         }
 
 
-def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
+def load_code_generation_dataset_from_file(
+    filepath, language
+) -> list[CodeGenerationProblem]:
     dataset = []
     valid_keys = {f.name for f in fields(CodeGenerationProblem)}
     with open(filepath, "r") as f:
         for line in f:
             p = json.loads(line)
-            if "task_id" in p:
-                assert "question_id" not in p
+            if "question_id" not in p:
+                assert "task_id" in p
                 p["question_id"] = p.pop("task_id")
             filtered_p = {key: value for key, value in p.items() if key in valid_keys}
             problem = CodeGenerationProblem(**filtered_p, language=language)
