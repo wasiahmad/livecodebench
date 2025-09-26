@@ -1,10 +1,10 @@
-import json
-import zlib
-import pickle
 import base64
-from enum import Enum
-from datetime import datetime
+import json
+import pickle
+import zlib
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 
 from datasets import load_dataset
 
@@ -95,11 +95,11 @@ class CodeGenerationProblem:
         }
 
     def insert_output_evaluation(
-            self,
-            output_list: list[str],
-            code_list: list[str],
-            graded_list: list[bool],
-            **kwargs,
+        self,
+        output_list: list[str],
+        code_list: list[str],
+        graded_list: list[bool],
+        **kwargs,
     ) -> dict:
         output = self.insert_output(output_list, code_list)
         output["graded_list"] = graded_list
@@ -126,24 +126,29 @@ class CodeGenerationProblem:
         }
 
 
-def load_code_generation_dataset(release_version="release_v1") -> list[CodeGenerationProblem]:
+def load_code_generation_dataset(
+    release_version="release_v1",
+) -> list[CodeGenerationProblem]:
     dataset = load_dataset(
-        "livecodebench/code_generation_lite", split="test", version_tag=release_version,
-        trust_remote_code=True
+        "livecodebench/code_generation_lite", split="test", version_tag=release_version
     )
     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
 
-def load_code_generation_dataset_not_fast(release_version="release_v1") -> list[CodeGenerationProblem]:
+def load_code_generation_dataset_not_fast(
+    release_version="release_v1",
+) -> list[CodeGenerationProblem]:
     dataset = load_dataset("livecodebench/code_generation", split="test")
     dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
 
-def load_code_generation_dataset_from_file(filepath, language) -> list[CodeGenerationProblem]:
+def load_code_generation_dataset_from_file(
+    filepath, language
+) -> list[CodeGenerationProblem]:
     dataset = []
     with open(filepath, "r") as f:
         for line in f:
