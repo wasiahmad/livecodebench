@@ -153,8 +153,8 @@ def load_code_generation_dataset_from_file(
     with open(filepath, "r") as f:
         for line in f:
             p = json.loads(line)
-            if "task_id" in p:
-                assert "question_id" not in p
+            if "question_id" not in p:
+                assert "task_id" in p
                 p["question_id"] = p.pop("task_id")
             dataset.append(CodeGenerationProblem(**p, language=language))
     print(f"Loaded {len(dataset)} problems")
