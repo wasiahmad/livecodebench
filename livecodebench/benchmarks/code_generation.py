@@ -2,7 +2,7 @@ import base64
 import json
 import pickle
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
 
