@@ -150,16 +150,13 @@ def load_code_generation_dataset_from_file(
     filepath, language
 ) -> list[CodeGenerationProblem]:
     dataset = []
-    valid_keys = {f.name for f in fields(CodeGenerationProblem)}
     with open(filepath, "r") as f:
         for line in f:
             p = json.loads(line)
             if "question_id" not in p:
                 assert "task_id" in p
                 p["question_id"] = p.pop("task_id")
-            filtered_p = {key: value for key, value in p.items() if key in valid_keys}
-            problem = CodeGenerationProblem(**filtered_p, language=language)
-            dataset.append(problem)
+            dataset.append(CodeGenerationProblem(**p, language=language))
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
