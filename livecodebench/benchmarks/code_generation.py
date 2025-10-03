@@ -6,8 +6,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
 
-from datasets import load_dataset
-from datasets.utils import Value
+from datasets import Value, load_dataset
 
 
 class Platform(Enum):
