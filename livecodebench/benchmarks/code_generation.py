@@ -127,21 +127,29 @@ class CodeGenerationProblem:
 
 
 def load_code_generation_dataset(
-    release_version="release_v1",
+    release_version="release_v1", language="python"
 ) -> list[CodeGenerationProblem]:
-    dataset = load_dataset(
-        "livecodebench/code_generation_lite", split="test", version_tag=release_version
-    )
-    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
+    if language == "python":
+        dataset = load_dataset(
+            "livecodebench/code_generation_lite",
+            split="test",
+            version_tag=release_version,
+        )
+    else:
+        dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
+    dataset = [CodeGenerationProblem(**p, language=language) for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
 
 
 def load_code_generation_dataset_not_fast(
-    release_version="release_v1",
+    release_version="release_v1", language="python"
 ) -> list[CodeGenerationProblem]:
-    dataset = load_dataset("livecodebench/code_generation", split="test")
-    dataset = [CodeGenerationProblem(**p, language="python") for p in dataset]  # type: ignore
+    if language == "python":
+        dataset = load_dataset("livecodebench/code_generation", split="test")
+    else:
+        dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
+    dataset = [CodeGenerationProblem(**p, language=language) for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
 

@@ -1,21 +1,22 @@
 import json
 from datetime import datetime
+
 from livecodebench.benchmarks import (
     load_code_generation_dataset,
-    load_code_generation_dataset_from_file
+    load_code_generation_dataset_from_file,
 )
-from livecodebench.evaluation import extract_instance_results, codegen_metrics
+from livecodebench.evaluation import codegen_metrics, extract_instance_results
 
 
 def evaluate(
-        custom_output_file: str,
-        release_version: str = "release_latest",
-        k_list=[1],
-        language: str = "python",
-        test_file: str = None,
-        num_process_evaluate: int = 12,
-        debug: bool = False,
-        timeout: int = 6
+    custom_output_file: str,
+    release_version: str = "release_latest",
+    k_list=[1],
+    language: str = "python",
+    test_file: str = None,
+    num_process_evaluate: int = 12,
+    debug: bool = False,
+    timeout: int = 6,
 ):
     custom_outputs = dict()
     with open(custom_output_file, "r") as f:
@@ -29,11 +30,17 @@ def evaluate(
     if test_file:
         benchmark = load_code_generation_dataset_from_file(test_file, language)
     else:
-        benchmark = load_code_generation_dataset(release_version)
+        benchmark = load_code_generation_dataset(release_version, language)
 
-    benchmark = [problem for problem in benchmark if problem.question_id in custom_outputs]
-    assert len(custom_outputs) == len(benchmark), f"{len(custom_outputs)} != {len(benchmark)}"
-    assert all(isinstance(custom_output, dict) for custom_output in custom_outputs.values())
+    benchmark = [
+        problem for problem in benchmark if problem.question_id in custom_outputs
+    ]
+    assert len(custom_outputs) == len(benchmark), (
+        f"{len(custom_outputs)} != {len(benchmark)}"
+    )
+    assert all(
+        isinstance(custom_output, dict) for custom_output in custom_outputs.values()
+    )
 
     save_results, combined_results = [], []
     for instance in benchmark:
@@ -52,7 +59,7 @@ def evaluate(
         num_process_evaluate=num_process_evaluate,
         timeout=timeout,
         debug=debug,
-        language=language
+        language=language,
     )
 
     graded = extract_instance_results(metrics[1])
