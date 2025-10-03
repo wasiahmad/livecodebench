@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import Enum
 
 from datasets import load_dataset
+from datasets.utils import Value
 
 
 class Platform(Enum):
@@ -137,6 +138,7 @@ def load_code_generation_dataset(
         )
     else:
         dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
+        dataset = dataset.cast_column("contest_date", Value("string"))
     dataset = [CodeGenerationProblem(**p, language=language) for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
@@ -149,6 +151,7 @@ def load_code_generation_dataset_not_fast(
         dataset = load_dataset("livecodebench/code_generation", split="test")
     else:
         dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
+        dataset = dataset.cast_column("contest_date", Value("string"))
     dataset = [CodeGenerationProblem(**p, language=language) for p in dataset]  # type: ignore
     print(f"Loaded {len(dataset)} problems")
     return dataset
