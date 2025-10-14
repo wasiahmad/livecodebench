@@ -134,6 +134,7 @@ def load_code_generation_dataset(
             "livecodebench/code_generation_lite",
             split="test",
             version_tag=release_version,
+            trust_remote_code=True,
         )
     else:
         dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
