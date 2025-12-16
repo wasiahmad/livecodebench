@@ -1,805 +1,347 @@
 import ast
 import faulthandler
 import json
+import multiprocessing
 import os
 import platform
 import shutil
-
-# to run the solution files we're using a timing based approach
 import signal
 import subprocess
 import sys
 import tempfile
 import time
-
-# used for debugging to time steps
-from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from io import StringIO
-
-# from pyext import RuntimeModule
 from types import ModuleType
+from unittest.mock import patch
 
-# used for testing the code that reads from input
-from unittest.mock import mock_open, patch
+# --- Constants ---
+IMPORT_HEADER = """
+import string, re, datetime, collections, heapq, bisect, copy, math, random, statistics, itertools, functools, operator, io, sys, json
+from string import *
+from re import *
+from datetime import *
+from collections import *
+from heapq import *
+from bisect import *
+from copy import *
+from math import *
+from random import *
+from statistics import *
+from itertools import *
+from functools import *
+from operator import *
+from io import *
+from sys import *
+from json import *
+from typing import *
+sys.setrecursionlimit(50000)
+"""
 
-import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
-import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n"
+
+class CodeType(Enum):
+    CALL_BASED = 0
+    STANDARD_INPUT = 1
 
 
-def truncatefn(s, length=300):
-    if isinstance(s, str):
-        pass
-    else:
-        s = str(s)
-    if len(s) <= length:
-        return s
-
-    return s[: length // 2] + "...(truncated) ..." + s[-length // 2 :]
-
-
-class CODE_TYPE(Enum):
-    call_based = 0
-    standard_input = 1
-
-
-# stuff for setting up signal timer
 class TimeoutException(Exception):
     pass
 
 
 def timeout_handler(signum, frame):
-    print("timeout occured: alarm went off")
-    raise TimeoutException
+    raise TimeoutException("Timeout")
 
 
-# used to capture stdout as a list
-# from https://stackoverflow.com/a/16571630/6416660
-# alternative use redirect_stdout() from contextlib
+# --- Utilities ---
+
+
+def truncate_str(s, length=300):
+    s = str(s)
+    if len(s) <= length:
+        return s
+    half = length // 2
+    return f"{s[:half]}...(truncated)...{s[-half:]}"
+
+
 class Capturing(list):
+    """Context manager to capture stdout."""
+
     def __enter__(self):
         self._stdout = sys.stdout
         sys.stdout = self._stringio = StringIO()
-        # Make closing the StringIO a no-op
-        self._stringio.close = lambda x: 1
         return self
 
     def __exit__(self, *args):
-        self.append(self._stringio.getvalue())
-        del self._stringio  # free up some memory
+        self.extend(self._stringio.getvalue().splitlines())
         sys.stdout = self._stdout
 
 
 def clean_if_name(code: str) -> str:
+    """unwraps code inside `if __name__ == '__main__':` robustly."""
     try:
-        astree = ast.parse(code)
-        last_block = astree.body[-1]
-        if isinstance(last_block, ast.If):
-            condition = last_block.test
-            if ast.unparse(condition).strip() == "__name__ == '__main__'":
-                code = (
-                    ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
-                )
-    except:
-        pass
-
-    return code
-
-
-def make_function(code: str) -> str:
-    try:
-        import_stmts = []
-        all_other_stmts = []
-        astree = ast.parse(code)
-        for stmt in astree.body:
-            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
-                import_stmts.append(stmt)
+        tree = ast.parse(code)
+        new_body = []
+        for node in tree.body:
+            if (
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.Compare)
+                and ast.unparse(node.test).strip() == "__name__ == '__main__'"
+            ):
+                new_body.extend(node.body)
             else:
-                all_other_stmts.append(stmt)
+                new_body.append(node)
 
-        function_ast = ast.FunctionDef(
-            name="wrapped_function",
-            args=ast.arguments(
-                posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]
-            ),
-            body=all_other_stmts,
-            decorator_list=[],
-            lineno=-1,
-        )
-        main_code = (
-            import_string
-            + "\n"
-            + ast.unparse(import_stmts)  # type: ignore
-            + "\n"
-            + ast.unparse(function_ast)  # type: ignore
-        )
-        return main_code
+        tree.body = new_body
+        return ast.unparse(tree)
     except Exception:
         return code
 
 
-def call_method(method, inputs):
-    if isinstance(inputs, list):
-        inputs = "\n".join(inputs)
-
-    inputs_line_iterator = iter(inputs.split("\n"))
-
-    # sys.setrecursionlimit(10000)
-
-    # @patch('builtins.input', side_effect=inputs.split("\n"))
-    @patch("builtins.open", mock_open(read_data=inputs))
-    @patch("sys.stdin", StringIO(inputs))
-    @patch("sys.stdin.readline", lambda *args: next(inputs_line_iterator))
-    @patch("sys.stdin.readlines", lambda *args: inputs.split("\n"))
-    @patch("sys.stdin.read", lambda *args: inputs)
-    # @patch('sys.stdout.write', print)
-    def _inner_call_method(_method):
-        try:
-            return _method()
-        except SystemExit:
-            pass
-        finally:
-            pass
-
-    return _inner_call_method(method)
-
-
-def get_function(compiled_sol, fn_name: str):  # type: ignore
+def wrap_code_in_function(code: str) -> str:
+    """Wraps global code into a function to prevent global scope pollution during exec."""
     try:
-        assert hasattr(compiled_sol, fn_name)
-        return getattr(compiled_sol, fn_name)
-    except Exception:
-        return
+        tree = ast.parse(code)
+        imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        others = [
+            n for n in tree.body if not isinstance(n, (ast.Import, ast.ImportFrom))
+        ]
 
-
-def compile_code(code: str, timeout: int):
-    signal.alarm(timeout)
-    try:
-        tmp_sol = ModuleType("tmp_sol", "")
-        exec(code, tmp_sol.__dict__)
-        if "class Solution" in code:
-            # leetcode wraps solutions in `Solution`
-            # this is a hack to check if it is leetcode solution or not
-            # currently livecodebench only supports LeetCode but
-            # else condition allows future extensibility to other platforms
-            compiled_sol = tmp_sol.Solution()
-        else:
-            # do nothing in the other case since function is accessible
-            compiled_sol = tmp_sol
-
-        assert compiled_sol is not None
-    finally:
-        signal.alarm(0)
-
-    return compiled_sol
-
-
-def compile_cpp_code(code: str, timeout: int):
-    temp_dir = tempfile.mkdtemp()
-    cpp_file_path = os.path.join(temp_dir, "solution.cpp")
-    executable_path = os.path.join(temp_dir, "solution")
-    compiled_successfully = False
-
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(timeout)
-
-    try:
-        with open(cpp_file_path, "w") as f:
-            f.write(code)
-
-        # Compile the C++ code
-        compile_process = subprocess.run(
-            ["g++", cpp_file_path, "-o", executable_path],
-            capture_output=True,
-            text=True,
-            check=False,  # Don't raise an exception on non-zero exit code
+        fn_def = ast.FunctionDef(
+            name="wrapped_function",
+            args=ast.arguments(
+                posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]
+            ),
+            body=others,
+            decorator_list=[],
+            lineno=1,
         )
 
-        if compile_process.returncode == 0:
-            compiled_successfully = True
-            return temp_dir
-        else:
-            return None
-
-    except TimeoutError:
-        print(f"Compilation timed out after {timeout} seconds.")
-        return None
-
+        return IMPORT_HEADER + "\n" + ast.unparse(imports) + "\n" + ast.unparse(fn_def)
     except Exception:
-        return None
+        return code
 
-    finally:
-        signal.alarm(0)
-        if not compiled_successfully and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except OSError as e:
-                print(f"Warning: Could not remove directory {temp_dir}: {e}")
 
+# --- Execution & Grading ---
 
-def convert_line_to_decimals(line: str) -> tuple[bool, list[Decimal]]:
-    try:
-        decimal_line = [Decimal(elem) for elem in line.split()]
-    except:
-        return False, []
-    return True, decimal_line
 
-
-def get_stripped_lines(val: str):
-    ## you don't want empty lines to add empty list after splitlines!
-    val = val.strip()
-
-    return [val_line.strip() for val_line in val.split("\n")]
-
-
-def grade_call_based(
-    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
-):
-    # call-based clean up logic
-    # need to wrap in try-catch logic after to catch the correct errors, but for now this is fine.
-    code = import_string + "\n\n" + code
-    compiled_sol = compile_code(code, timeout)
-
-    if compiled_sol is None:
-        return
-
-    method = get_function(compiled_sol, fn_name)
-
-    if method is None:
-        return
-
-    all_inputs = [
-        [json.loads(line) for line in inputs.split("\n")] for inputs in all_inputs
-    ]
-
-    all_outputs = [json.loads(output) for output in all_outputs]
-
-    total_execution = 0
-    all_results = []
-    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
-        signal.alarm(timeout)
-        faulthandler.enable()
-        try:
-            # can lock here so time is useful
-            start = time.time()
-            prediction = method(*gt_inp)
-            total_execution += time.time() - start
-            signal.alarm(0)
-
-            # don't penalize model if it produces tuples instead of lists
-            # ground truth sequences are not tuples
-            if isinstance(prediction, tuple):
-                prediction = list(prediction)
-
-            tmp_result = prediction == gt_out
-
-            # handle floating point comparisons
-
-            all_results.append(tmp_result)
-
-            if not tmp_result:
-                return all_results, {
-                    "output": truncatefn(prediction),
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                    "error_code": -2,
-                    "error_message": "Wrong Answer",
-                }
-        except Exception as e:
-            signal.alarm(0)
-            if "timeoutexception" in repr(e).lower():
-                all_results.append(-3)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -3,
-                    "error_message": "Time Limit Exceeded",
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                }
-            else:
-                all_results.append(-4)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -4,
-                    "error_message": "Runtime Error",
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                }
-
-        finally:
-            signal.alarm(0)
-            faulthandler.disable()
-
-    return all_results, {"execution time": total_execution}
-
-
-def grade_call_based_cpp(
-    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
-):
-    assert len(all_inputs) == 1 and len(all_outputs) == 1 and all_outputs[0] == ""
-    code = import_string_cpp + "\n\n" + code + "\n\n" + all_inputs[0]
-    temp_dir = compile_cpp_code(code, timeout)
-    if temp_dir is None:
-        return [False], {"error_code": -1, "error_message": "Compilation failed"}
-
-    executable_path = f"{temp_dir}/solution"
-    all_results = []
-    total_execution = 0
-    signal.signal(signal.SIGALRM, timeout_handler)
-
-    try:
-        signal.alarm(timeout)
-        faulthandler.enable()
-        start_time = time.time()
-
-        max_memory_bytes = 8 * (1024**3)
-        process = subprocess.run(
-            [executable_path],
-            capture_output=False,  # we don't need stdout and stderr
-            text=True,
-            check=False,  # Do not raise exception on non-zero exit
-            preexec_fn=lambda: set_memory_limit(max_memory_bytes),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # max memory is set to 8GB
-        # max_memory_bytes = 8 * (1024 ** 3)
-        # process = subprocess.Popen(
-        #     [executable_path],
-        #     stdin=subprocess.PIPE,
-        #     stdout=subprocess.PIPE,
-        #     stderr=subprocess.PIPE,
-        #     text=True,
-        #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
-        # )
-        # stdout, stderr = process.communicate()
-
-        end_time = time.time()
-        total_execution += end_time - start_time
-        signal.alarm(0)
-
-        if process.returncode == 0:
-            all_results.append(True)
-        else:
-            all_results.append(-2)
-            return all_results, {"error_code": -2, "error_message": "Wrong Answer"}
-
-    except TimeoutError as e:
-        signal.alarm(0)
-        all_results.append(-3)
-        return all_results, {
-            "error": repr(e),
-            "error_code": -3,
-            "error_message": "Time Limit Exceeded",
-        }
-
-    except MemoryError as e:
-        signal.alarm(0)
-        all_results.append(-5)
-        return all_results, {
-            "error": repr(e),
-            "error_code": -5,
-            "error_message": "Memory Limit Exceeded",
-        }
-
-    except Exception as e:
-        all_results.append(-4)
-        return all_results, {
-            "error": repr(e),
-            "error_code": -4,
-            "error_message": "Runtime Error",
-        }
-
-    finally:
-        signal.alarm(0)
-        faulthandler.disable()
-        if os.path.exists(executable_path):
-            try:
-                os.remove(executable_path)
-            except OSError as e:
-                print(f"Warning: Could not remove executable {executable_path}: {e}")
-        if os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except OSError as e:
-                print(f"Warning: Could not remove directory {temp_dir}: {e}")
-
-    return all_results, {"execution time": total_execution}
-
-
-def grade_stdio(
-    code: str,
-    all_inputs: list,
-    all_outputs: list,
-    timeout: int,
-):
-    ## runtime doesn't interact well with __name__ == '__main__'
-    code = clean_if_name(code)
-
-    ## we wrap the given code inside another function
-    code = make_function(code)
-
-    compiled_sol = compile_code(code, timeout)
-    if compiled_sol is None:
-        return
-
-    method = get_function(compiled_sol, "wrapped_function")
-
-    if method is None:
-        return
-
-    all_results = []
-    total_execution_time = 0
-    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
-        signal.alarm(timeout)
-        faulthandler.enable()
-
-        signal.alarm(timeout)
-        with Capturing() as captured_output:
-            try:
-                start = time.time()
-                call_method(method, gt_inp)
-                total_execution_time += time.time() - start
-                # reset the alarm
-                signal.alarm(0)
-            except Exception as e:
-                signal.alarm(0)
-                if "timeoutexception" in repr(e).lower():
-                    all_results.append(-3)
-                    return all_results, {
-                        "error": repr(e),
-                        "error_code": -3,
-                        "error_message": "Time Limit Exceeded",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
-                else:
-                    all_results.append(-4)
-                    return all_results, {
-                        "error": repr(e),
-                        "error_code": -4,
-                        "error_message": "Runtime Error",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
-
-            finally:
-                signal.alarm(0)
-                faulthandler.disable()
-
-        prediction = captured_output[0]
-
-        stripped_prediction_lines = get_stripped_lines(prediction)
-        stripped_gt_out_lines = get_stripped_lines(gt_out)
-
-        ## WA happens in multiple circumstances
-        ## so cache the return to make it clean!
-        WA_send_args = {
-            "output": truncatefn(prediction),
-            "inputs": truncatefn(gt_inp),
-            "expected": truncatefn(gt_out),
-            "error_code": -2,
-        }
-
-        if len(stripped_prediction_lines) != len(stripped_gt_out_lines):
-            all_results.append(-2)
-            WA_send_args["error_message"] = "Wrong answer: mismatched output length"
-            return all_results, WA_send_args
-
-        for output_line_idx, (
-            stripped_prediction_line,
-            stripped_gt_out_line,
-        ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
-            WA_send_args["error_message"] = (
-                f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
-            )
-
-            ## CASE 1: exact match
-            if stripped_prediction_line == stripped_gt_out_line:
-                continue
-
-            ## CASE 2: element-wise comparision
-            ## if there are floating elements
-            ## use `decimal` library for good floating point comparision
-            ## otherwise gotcha: np.isclose(50000000000000000, 50000000000000001) = True
-            ## note that we should always be able to convert to decimals
-
-            success, decimal_prediction_line = convert_line_to_decimals(
-                stripped_prediction_line
-            )
-            if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
-            success, decimal_gtout_line = convert_line_to_decimals(stripped_gt_out_line)
-            if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
-
-            if decimal_prediction_line == decimal_gtout_line:
-                continue
-
-            all_results.append(-2)
-            return all_results, WA_send_args
-        all_results.append(True)
-
-    return all_results, {"execution time": total_execution_time}
-
-
-def grade_stdio_cpp(
-    code: str,
-    all_inputs: list,
-    all_outputs: list,
-    timeout: int,
-):
-    temp_dir = compile_cpp_code(code, timeout)
-    if temp_dir is None:
-        return [False], {"error_code": -1, "error_message": "Compilation failed"}
-
-    executable_path = f"{temp_dir}/solution"
-    all_results = []
-    total_execution_time = 0.0
-    signal.signal(signal.SIGALRM, timeout_handler)
-
-    try:
-        signal.alarm(timeout)
-        faulthandler.enable()
-        for i, input_str in enumerate(all_inputs):
-            expected_output = all_outputs[i].strip()
-            try:
-                start_time = time.time()
-
-                # max memory is set to 8GB
-                max_memory_bytes = 8 * (1024**3)
-                process = subprocess.run(
-                    [executable_path],
-                    input=input_str,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    preexec_fn=lambda: set_memory_limit(max_memory_bytes),
-                )
-                actual_output = process.stdout.strip()
-
-                # max memory is set to 8GB
-                # max_memory_bytes = 8 * (1024 ** 3)
-                # process = subprocess.Popen(
-                #     [executable_path],
-                #     stdin=subprocess.PIPE,
-                #     stdout=subprocess.PIPE,
-                #     stderr=subprocess.PIPE,
-                #     text=True,
-                #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
-                # )
-                # process.stdin.write(input_str)
-                # process.stdin.close()
-                # stdout, stderr = process.communicate()
-                # actual_output = stdout.strip()
-
-                end_time = time.time()
-                execution_time = end_time - start_time
-                total_execution_time += execution_time
-                signal.alarm(0)
-
-                has_passed = True if actual_output == expected_output else False
-                all_results.append(has_passed)
-                if not has_passed:
-                    return all_results, {
-                        "error_code": -2,
-                        "error_message": "Wrong Answer",
-                    }
-
-            except TimeoutError as e:
-                signal.alarm(0)
-                all_results.append(-3)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -3,
-                    "error_message": "Time Limit Exceeded",
-                }
-
-            except MemoryError as e:
-                signal.alarm(0)
-                all_results.append(-5)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -5,
-                    "error_message": "Memory Limit Exceeded",
-                }
-
-            except Exception as e:
-                all_results.append(-4)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -4,
-                    "error_message": "Runtime Error",
-                }
-
-        return all_results, {"execution time": total_execution_time}
-
-    finally:
-        signal.alarm(0)
-        faulthandler.disable()
-        if os.path.exists(executable_path):
-            try:
-                os.remove(executable_path)
-            except OSError as e:
-                print(f"Warning: Could not remove executable {executable_path}: {e}")
-        if os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except OSError as e:
-                print(f"Warning: Could not remove directory {temp_dir}: {e}")
-
-
-def run_test(sample, test=None, debug=False, timeout=6):
+def run_python_isolated(code, inputs, outputs, time_limit, return_dict):
     """
-    if test(generated_code) is not None it'll try to run the code.
-    otherwise it'll just return an input and output pair.
+    Runs Python code in a separate process to allow destructive 'sandboxing'
+    without killing the main test runner.
     """
-    signal.signal(signal.SIGALRM, timeout_handler)
-
-    # Disable functionalities that can make destructive changes to the test.
-    # max memory is set to 4GB
+    # 1. Apply Sandbox (Destructive)
     reliability_guard()
 
-    if debug:
-        print(f"start = {datetime.now().time()}")
-
+    # 2. Compile
     try:
-        in_outs = json.loads(sample["input_output"])
-    except ValueError as e:
-        raise e
-        in_outs = None
+        code = clean_if_name(code)
+        code = wrap_code_in_function(code)
 
-    if in_outs:
-        if in_outs.get("fn_name") is None:
-            which_type = CODE_TYPE.standard_input  # Standard input
-            method_name = None
+        # Create module
+        module = ModuleType("solution")
+        exec(code, module.__dict__)
 
+        # Handle LeetCode style class wrappers
+        if hasattr(module, "Solution"):
+            instance = module.Solution()
+            method = getattr(instance, "wrapped_function", None) or getattr(
+                instance, dir(instance)[-1]
+            )  # Fallback
+        elif hasattr(module, "wrapped_function"):
+            method = module.wrapped_function
         else:
-            which_type = CODE_TYPE.call_based  # Call-based
-            method_name = in_outs["fn_name"]
+            return_dict["result"] = ([-4], {"error_message": "No entry point found"})
+            return
 
-    if debug:
-        print(f"loaded input_output = {datetime.now().time()}")
+    except Exception as e:
+        return_dict["result"] = (
+            [-4],
+            {"error_message": f"Compilation Error: {repr(e)}"},
+        )
+        return
 
-    if test is None:
-        assert False, "should not happen: test code is none"
-        return in_outs, {"error": "no test code provided"}
+    # 3. Execute Tests
+    results = []
+    total_time = 0
 
-    elif test is not None:
-        results = []
-        sol = import_string
-        if debug:
-            print(f"loading test code = {datetime.now().time()}")
-
-        if which_type == CODE_TYPE.call_based:
-            signal.alarm(timeout)
-            try:
-                results, metadata = grade_call_based(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    fn_name=method_name,
-                    timeout=timeout,
-                )
-                return results, metadata
-            except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
-                }
-            finally:
-                signal.alarm(0)
-
-        elif which_type == CODE_TYPE.standard_input:
-            # sol
-            # if code has if __name__ == "__main__": then remove it
-
-            signal.alarm(timeout)
-            try:
-                results, metadata = grade_stdio(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    timeout=timeout,
-                )
-                return results, metadata
-            except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
-                }
-            finally:
-                signal.alarm(0)
-
-
-def run_test_cpp(sample, test=None, debug=False, timeout=30):
-    """
-    if test(generated_code) is not None it'll try to run the code.
-    otherwise it'll just return an input and output pair.
-    """
+    # We use signal inside this child process for per-test-case timeouts
     signal.signal(signal.SIGALRM, timeout_handler)
 
-    if debug:
-        print(f"start = {datetime.now().time()}")
+    for gt_inp, gt_out in zip(inputs, outputs):
+        try:
+            signal.alarm(time_limit)
+            start = time.time()
 
-    try:
-        in_outs = json.loads(sample["input_output"])
-    except ValueError as e:
-        raise e
-        in_outs = None
+            # Mock IO
+            with (
+                patch("builtins.input", side_effect=gt_inp.split("\n")),
+                patch("sys.stdin", StringIO(gt_inp)),
+                Capturing() as output_lines,
+            ):
+                method()
 
-    if in_outs:
-        if in_outs.get("fn_name") is None:
-            which_type = CODE_TYPE.standard_input  # Standard input
-            method_name = None
+            exec_time = time.time() - start
+            total_time += exec_time
+            signal.alarm(0)
 
-        else:
-            which_type = CODE_TYPE.call_based  # Call-based
-            method_name = in_outs["fn_name"]
+            # Validate
+            prediction = "\n".join(output_lines).strip()
+            passed, err_meta = check_correctness(prediction, gt_out, gt_inp)
 
-    if debug:
-        print(f"loaded input_output = {datetime.now().time()}")
+            if passed:
+                results.append(True)
+            else:
+                return_dict["result"] = (results + [-2], err_meta)
+                return
 
-    if test is None:
-        assert False, "should not happen: test code is none"
-        return in_outs, {"error": "no test code provided"}
+        except TimeoutException:
+            signal.alarm(0)
+            return_dict["result"] = (
+                results + [-3],
+                {"error_message": "Time Limit Exceeded"},
+            )
+            return
+        except Exception as e:
+            signal.alarm(0)
+            return_dict["result"] = (
+                results + [-4],
+                {"error_message": f"Runtime Error: {repr(e)}"},
+            )
+            return
 
-    elif test is not None:
-        if debug:
-            print(f"loading test code = {datetime.now().time()}")
+    return_dict["result"] = (results, {"execution_time": total_time})
 
-        if which_type == CODE_TYPE.call_based:
-            signal.alarm(timeout)
-            try:
-                results, metadata = grade_call_based_cpp(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    fn_name=method_name,
-                    timeout=timeout,
-                )
-                return results, metadata
-            except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
+
+def check_correctness(prediction: str, expected: str, inputs: str) -> tuple[bool, dict]:
+    pred_lines = [x.strip() for x in prediction.splitlines() if x.strip()]
+    gt_lines = [x.strip() for x in expected.splitlines() if x.strip()]
+
+    if len(pred_lines) != len(gt_lines):
+        return False, {
+            "error_code": -2,
+            "error_message": "Output length mismatch",
+            "inputs": truncate_str(inputs),
+            "expected": truncate_str(expected),
+            "output": truncate_str(prediction),
+        }
+
+    for p_line, g_line in zip(pred_lines, gt_lines):
+        if p_line == g_line:
+            continue
+
+        # Try numeric comparison
+        try:
+            p_nums = [Decimal(x) for x in p_line.split()]
+            g_nums = [Decimal(x) for x in g_line.split()]
+            if p_nums != g_nums:
+                raise ValueError
+        except:
+            return False, {
+                "error_code": -2,
+                "error_message": f"Mismatch: {truncate_str(p_line)} != {truncate_str(g_line)}",
+                "inputs": truncate_str(inputs),
+                "expected": truncate_str(expected),
+                "output": truncate_str(prediction),
+            }
+
+    return True, {}
+
+
+def grade_stdio_python(code, inputs, outputs, timeout, time_limit, memory_limit):
+    manager = multiprocessing.Manager()
+    return_dict = manager.dict()
+
+    # Run user code in a separate process to contain the "reliability_guard" damage
+    p = multiprocessing.Process(
+        target=run_python_isolated,
+        args=(code, inputs, outputs, time_limit, return_dict),
+    )
+    p.start()
+    p.join(timeout)
+
+    if p.is_alive():
+        p.terminate()
+        p.join()
+        return [-3], {"error_message": "Global Timeout"}
+
+    if "result" in return_dict:
+        return return_dict["result"]
+
+    return [-4], {"error_message": "Process crashed or produced no result"}
+
+
+def grade_stdio_cpp(code, inputs, outputs, timeout, time_limit, memory_limit):
+    # C++ does not need multiprocessing isolation as it runs binary in subprocess
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src_path = os.path.join(temp_dir, "solution.cpp")
+        exe_path = os.path.join(temp_dir, "solution")
+
+        with open(src_path, "w") as f:
+            f.write(code)
+
+        # Compile
+        try:
+            res = subprocess.run(
+                ["g++", "-O3", src_path, "-o", exe_path],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if res.returncode != 0:
+                return [False], {
+                    "error_code": -1,
+                    "error_message": "Compilation failed",
+                    "detail": res.stderr,
                 }
-            finally:
-                signal.alarm(0)
+        except subprocess.TimeoutExpired:
+            return [False], {"error_code": -1, "error_message": "Compilation timed out"}
 
-        elif which_type == CODE_TYPE.standard_input:
-            signal.alarm(timeout)
+        results = []
+        total_time = 0
+
+        for inp, expected in zip(inputs, outputs):
             try:
-                results, metadata = grade_stdio_cpp(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    timeout=timeout,
+                start = time.time()
+
+                # Enforce memory limit via preexec_fn
+                def set_limits():
+                    if memory_limit:
+                        mem_bytes = memory_limit * 1024 * 1024
+                        import resource
+
+                        resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+
+                proc = subprocess.run(
+                    [exe_path],
+                    input=inp,
+                    capture_output=True,
+                    text=True,
+                    timeout=time_limit,
+                    preexec_fn=set_limits,
                 )
-                return results, metadata
+
+                total_time += time.time() - start
+                passed, err_meta = check_correctness(proc.stdout, expected, inp)
+
+                if passed:
+                    results.append(True)
+                else:
+                    return results + [-2], err_meta
+
+            except subprocess.TimeoutExpired:
+                return results + [-3], {"error_message": "Time Limit Exceeded"}
             except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
-                }
-            finally:
-                signal.alarm(0)
+                return results + [-4], {"error_message": f"Runtime Error: {e}"}
+
+        return results, {"execution_time": total_time}
 
 
 def reliability_guard(maximum_memory_bytes=None):
     """
-    This disables various destructive functions and prevents the generated code
-    from interfering with the test (e.g. fork bomb, killing other processes,
-    removing filesystem files, etc.)
-    WARNING
-    This function is NOT a security sandbox. Untrusted code, including, model-
-    generated code, should not be blindly executed outside of one. See the
-    Codex paper for more information about OpenAI's code sandbox, and proceed
-    with caution.
+    Disables dangerous functions.
+    NOTE: This must run in the child process (run_python_isolated), otherwise
+    it breaks the main runner's ability to use subprocess/io.
     """
 
     if maximum_memory_bytes is not None:
@@ -818,10 +360,11 @@ def reliability_guard(maximum_memory_bytes=None):
 
     faulthandler.disable()
 
+    # Disable dangerous builtins/modules
     import builtins
 
-    # builtins.exit = None
     builtins.quit = None
+    # builtins.exit = None
 
     import os
 
@@ -855,8 +398,6 @@ def reliability_guard(maximum_memory_bytes=None):
     os.getcwd = None
     os.chdir = None
 
-    import shutil
-
     shutil.rmtree = None
     shutil.move = None
     shutil.chown = None
@@ -876,15 +417,29 @@ def reliability_guard(maximum_memory_bytes=None):
     sys.modules["tkinter"] = None
 
 
-def set_memory_limit(maximum_memory_bytes):
-    assert maximum_memory_bytes is not None
-    import resource
+def run_test(sample, test=None, debug=False, timeout=6, language="python"):
+    """
+    Run test for generated code.
+    Arguments must match original signature to prevent TypeErrors in existing pipelines.
+    """
+    if test is None:
+        return [-4], {"error_message": "no test code provided"}
 
-    resource.setrlimit(resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes))
-    resource.setrlimit(
-        resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes)
-    )
-    if not platform.uname().system == "Darwin":
-        resource.setrlimit(
-            resource.RLIMIT_STACK, (maximum_memory_bytes, maximum_memory_bytes)
+    try:
+        data = json.loads(sample["input_output"])
+        inputs = data["inputs"]
+        outputs = data["outputs"]
+        t_limit_ms = data.get("time_limit", 1000)
+        time_limit_sec = t_limit_ms / 1000.0
+        m_limit_mb = data.get("memory_limit", 512)
+    except Exception as e:
+        return [-4], {"error_message": f"Invalid sample data: {e}"}
+
+    if language == "cpp":
+        return grade_stdio_cpp(
+            test, inputs, outputs, timeout, time_limit_sec, m_limit_mb
+        )
+    else:
+        return grade_stdio_python(
+            test, inputs, outputs, timeout, time_limit_sec, m_limit_mb
         )

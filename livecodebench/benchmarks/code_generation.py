@@ -112,6 +112,8 @@ class CodeGenerationProblem:
                 {
                     "inputs": [t.input for t in self.test_cases],
                     "outputs": [t.output for t in self.test_cases],
+                    "time_limit": self.time_limit,
+                    "memory_limit": self.memory_limit,
                 }
             ),
         }

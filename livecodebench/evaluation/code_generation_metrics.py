@@ -16,16 +16,13 @@ import numpy as np
 from tqdm import tqdm
 
 from livecodebench.evaluation.pass_k_utils import compute_metrics_from_results
-from livecodebench.evaluation.testing_util import run_test, run_test_cpp
+from livecodebench.evaluation.testing_util import run_test
 
 
 def _temp_run(sample, generation, debug, result, metadata_list, timeout, language):
-    if language == "cpp":
-        res, metadata = run_test_cpp(
-            sample, test=generation, debug=debug, timeout=timeout
-        )
-    else:
-        res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
+    res, metadata = run_test(
+        sample, test=generation, debug=debug, timeout=timeout, language=language
+    )
     result.append(res)
     metadata_list.append(metadata)
 
@@ -72,7 +69,7 @@ def evaluate_generations_by_problem(args):
             curr_res = [-2]
             try:
                 curr_res, curr_metadata = check_correctness(
-                    sample, o, timeout=timeout, debug=debug
+                    sample, o, timeout=timeout, debug=debug, language=language
                 )
                 if debug:
                     print(f"\nSuccessful compilation of task {o_idx}!")
