@@ -15,22 +15,29 @@ def evaluate(
     debug: bool = False,
     timeout: int = 6,
 ):
+    benchmark = load_code_generation_dataset_from_file(test_file, language, test_dir)
+    benchmark_ids = {problem.problem_id for problem in benchmark}
+
     custom_outputs = dict()
+    skipped_count = 0
     with open(custom_output_file, "r") as f:
         for line in f:
+            if not line.strip():
+                continue
             output = json.loads(line)
-            custom_outputs[output["problem_id"]] = output
+            problem_id = output["problem_id"]
+            if problem_id in benchmark_ids:
+                custom_outputs[problem_id] = output
+            else:
+                skipped_count += 1
 
-    benchmark = load_code_generation_dataset_from_file(test_file, language, test_dir)
     benchmark = [
         problem for problem in benchmark if problem.problem_id in custom_outputs
     ]
-    assert len(custom_outputs) == len(benchmark), (
-        f"{len(custom_outputs)} != {len(benchmark)}"
-    )
-    assert all(
-        isinstance(custom_output, dict) for custom_output in custom_outputs.values()
-    )
+    if skipped_count > 0:
+        print(f"⚠️  Skipped {skipped_count} custom outputs (no matching test data)")
+
+    print(f"Evaluating {len(benchmark)} problems")
 
     save_results, combined_results = [], []
     for instance in benchmark:
