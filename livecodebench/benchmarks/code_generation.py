@@ -1,16 +1,14 @@
-import base64
 import json
-import pickle
-import zlib
-from dataclasses import dataclass, fields
-from datetime import datetime
+import os
+import zipfile
+from dataclasses import dataclass, field, fields
 from enum import Enum
+from pathlib import Path
+from typing import Dict, List, Optional
 
 
 class Platform(Enum):
-    LEETCODE = "leetcode"
     CODEFORCES = "codeforces"
-    ATCODER = "atcoder"
 
 
 class Difficulty(Enum):
@@ -19,73 +17,75 @@ class Difficulty(Enum):
     HARD = "hard"
 
 
-class TestType(Enum):
-    STDIN = "stdin"
-    FUNCTIONAL = "functional"
-
-
 @dataclass
 class Test:
     input: str
     output: str
-    testtype: TestType
-
-    def __post_init__(self):
-        self.testtype = TestType(self.testtype)
-        # if self.testtype == TestType.FUNCTIONAL:
-        #     self.input = json.loads(self.input)
-        #     self.output = json.loads(self.output)
 
 
 @dataclass
 class CodeGenerationProblem:
-    question_title: str
-    question_content: str
     platform: Platform
-    question_id: str
-    contest_id: str
-    contest_date: datetime
-    starter_code: str
+    problem_id: str
+    problem_title: str
+    problem_statement: str
+    link: str
+    time_limit: int
+    memory_limit: int
     difficulty: Difficulty
-    public_test_cases: list[Test]
-    private_test_cases: list[Test]
-    metadata: dict
     language: str
 
+    _zip_path: Path = field(repr=False)
+    _cached_test_cases: Optional[List[Test]] = field(default=None, repr=False)
+
     def __post_init__(self):
-        self.platform = Platform(self.platform)
-        self.difficulty = Difficulty(self.difficulty)
-        self.contest_date = datetime.fromisoformat(self.contest_date)
+        if isinstance(self.platform, str):
+            self.platform = Platform(self.platform)
+        if isinstance(self.difficulty, str):
+            self.difficulty = Difficulty(self.difficulty)
 
-        if self.public_test_cases:
-            self.public_test_cases = json.loads(self.public_test_cases)  # type: ignore
-            self.public_test_cases = [Test(**t) for t in self.public_test_cases]
-        else:
-            self.public_test_cases = []
+    @property
+    def test_cases(self) -> List[Test]:
+        """Lazy loads test cases from the zip file only when accessed."""
+        if self._cached_test_cases is not None:
+            return self._cached_test_cases
 
+        loaded_tests = []
         try:
-            self.private_test_cases = json.loads(self.private_test_cases)  # type: ignore
-        except:
-            self.private_test_cases = json.loads(
-                pickle.loads(
-                    zlib.decompress(
-                        base64.b64decode(self.private_test_cases.encode("utf-8"))  # type: ignore
-                    )
-                )
-            )  # type: ignore
-        self.private_test_cases = [Test(**t) for t in self.private_test_cases]
+            with zipfile.ZipFile(self._zip_path, "r") as zip_ref:
+                all_files = set(zip_ref.namelist())
 
-        self.metadata = json.loads(self.metadata)  # type: ignore
+                input_files = [
+                    f
+                    for f in all_files
+                    if f.startswith("testdata/") and f.endswith(".in")
+                ]
+
+                for in_file in sorted(input_files):
+                    expected_ans = in_file[:-3] + ".ans"
+                    if expected_ans in all_files:
+                        with zip_ref.open(in_file) as f:
+                            in_txt = f.read().decode("utf-8", errors="replace")
+                        with zip_ref.open(expected_ans) as f:
+                            ans_txt = f.read().decode("utf-8", errors="replace")
+
+                        loaded_tests.append(Test(input=in_txt, output=ans_txt))
+
+        except Exception as e:
+            print(f"Error reading zip for problem {self.problem_id}: {e}")
+
+        self._cached_test_cases = loaded_tests
+        return self._cached_test_cases
 
     def insert_output(self, output_list: list[str], code_list: list[str]) -> dict:
         return {
-            "question_title": self.question_title,
-            "question_content": self.question_content,
             "platform": self.platform.value,
-            "question_id": self.question_id,
-            "contest_id": self.contest_id,
-            "contest_date": self.contest_date.isoformat(),
-            "starter_code": self.starter_code,
+            "problem_id": self.problem_id,
+            "problem_title": self.problem_title,
+            "problem_statement": self.problem_statement,
+            "link": self.link,
+            "time_limit": self.time_limit,
+            "memory_limit": self.memory_limit,
             "difficulty": self.difficulty.value,
             "output_list": output_list,
             "code_list": code_list,
@@ -110,33 +110,79 @@ class CodeGenerationProblem:
         return {
             "input_output": json.dumps(
                 {
-                    "inputs": [
-                        t.input
-                        for t in self.public_test_cases + self.private_test_cases
-                    ],
-                    "outputs": [
-                        t.output
-                        for t in self.public_test_cases + self.private_test_cases
-                    ],
-                    "fn_name": self.metadata.get("func_name", None),
+                    "inputs": [t.input for t in self.test_cases],
+                    "outputs": [t.output for t in self.test_cases],
                 }
             ),
         }
 
 
+def index_zip_files(directory_path: Path) -> Dict[str, Path]:
+    target_dir = Path(directory_path)
+    if not target_dir.exists():
+        print(f"Test directory not found: {target_dir}")
+        return {}
+    print("Indexing zip files...")
+    return {p.stem: p for p in target_dir.glob("*.zip")}
+
+
 def load_code_generation_dataset_from_file(
-    filepath, language
-) -> list[CodeGenerationProblem]:
+    filepath, language, test_dir
+) -> List[CodeGenerationProblem]:
+    zip_index = index_zip_files(Path(test_dir))
+
     dataset = []
-    valid_keys = {f.name for f in fields(CodeGenerationProblem)}
+    init_fields = {
+        f.name
+        for f in fields(CodeGenerationProblem)
+        if f.name not in ["_zip_path", "_cached_test_cases"]
+    }
+
+    print(f"Loading problems from {filepath}...")
+    skipped_count = 0
+
     with open(filepath, "r") as f:
         for line in f:
+            if not line.strip():
+                continue
             p = json.loads(line)
-            if "question_id" not in p:
-                assert "task_id" in p
-                p["question_id"] = p.pop("task_id")
-            filtered_p = {key: value for key, value in p.items() if key in valid_keys}
-            problem = CodeGenerationProblem(**filtered_p, language=language)
-            dataset.append(problem)
-    print(f"Loaded {len(dataset)} problems")
+
+            p_id = str(p.get("problem_id", ""))
+            zip_path = zip_index.get(p_id)
+            if not zip_path:
+                skipped_count += 1
+                continue
+
+            filtered_p = {key: value for key, value in p.items() if key in init_fields}
+            try:
+                problem = CodeGenerationProblem(
+                    **filtered_p, language=language, _zip_path=zip_path
+                )
+                dataset.append(problem)
+            except Exception as e:
+                print(f"Error initializing problem {p_id}: {e}")
+
+    print(f"Loaded {len(dataset)} problems.")
+    if skipped_count > 0:
+        print(
+            f"⚠️  Skipped {skipped_count} problems because their .zip file was missing."
+        )
+
     return dataset
+
+
+if __name__ == "__main__":
+    # Example paths
+    jsonl_path = (
+        "/home/wahmad/Desktop/workspace/ns-data/livecodebench-pro/test_25q1.jsonl"
+    )
+    test_zip_dir = "/home/wahmad/Desktop/workspace/ns-data/livecodebench-pro/testcases"
+
+    if os.path.exists(jsonl_path) and os.path.isdir(test_zip_dir):
+        problems = load_code_generation_dataset_from_file(
+            filepath=jsonl_path, language="python", test_dir=test_zip_dir
+        )
+        if problems:
+            print(f"Example Problem: {problems[0].problem_id}")
+            print(f"Test cases loaded: {len(problems[0].test_cases)}")
+            print(f"First Input: {problems[0].test_cases[0].input[:50]}...")

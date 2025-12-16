@@ -7,10 +7,10 @@ from livecodebench.evaluation import codegen_metrics, extract_instance_results
 
 def evaluate(
     custom_output_file: str,
-    release_version: str,
     test_file: str,
+    test_dir: str,
     k_list=[1],
-    language: str = "python",
+    language: str = "cpp",
     num_process_evaluate: int = 12,
     debug: bool = False,
     timeout: int = 6,
@@ -19,14 +19,11 @@ def evaluate(
     with open(custom_output_file, "r") as f:
         for line in f:
             output = json.loads(line)
-            if "question_id" not in output:
-                assert "task_id" in output
-                output["question_id"] = output.pop("task_id")
-            custom_outputs[output["question_id"]] = output
+            custom_outputs[output["problem_id"]] = output
 
-    benchmark = load_code_generation_dataset_from_file(test_file, language)
+    benchmark = load_code_generation_dataset_from_file(test_file, language, test_dir)
     benchmark = [
-        problem for problem in benchmark if problem.question_id in custom_outputs
+        problem for problem in benchmark if problem.problem_id in custom_outputs
     ]
     assert len(custom_outputs) == len(benchmark), (
         f"{len(custom_outputs)} != {len(benchmark)}"
@@ -37,7 +34,7 @@ def evaluate(
 
     save_results, combined_results = [], []
     for instance in benchmark:
-        code_list = custom_outputs[instance.question_id]["code_list"]
+        code_list = custom_outputs[instance.problem_id]["code_list"]
         output = instance.insert_output(code_list, code_list)
         save_results.append(output)
         combined_results.append((code_list, code_list))
@@ -79,7 +76,7 @@ def evaluate(
     output_results["eval"] = dict()
     difficulty_wise_pass_at_1 = dict()
     for r in save_eval_results:
-        output_results["eval"][r["question_id"]] = r
+        output_results["eval"][r["problem_id"]] = r
         if r["difficulty"] not in difficulty_wise_pass_at_1:
             difficulty_wise_pass_at_1[r["difficulty"]] = []
         difficulty_wise_pass_at_1[r["difficulty"]].append(r["pass@1"])
