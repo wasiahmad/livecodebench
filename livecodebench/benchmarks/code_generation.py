@@ -13,6 +13,11 @@ class Platform(Enum):
     LEETCODE = "leetcode"
     CODEFORCES = "codeforces"
     ATCODER = "atcoder"
+    OTHER = "other"
+
+    @classmethod
+    def _missing_(cls, value):
+        return cls.OTHER
 
 
 class Difficulty(Enum):

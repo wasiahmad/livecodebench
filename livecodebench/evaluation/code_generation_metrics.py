@@ -15,13 +15,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from tqdm import tqdm
 
-from livecodebench.evaluation.testing_util import run_test, run_test_cpp
 from livecodebench.evaluation.pass_k_utils import compute_metrics_from_results
+from livecodebench.evaluation.testing_util import run_test, run_test_cpp
 
 
 def _temp_run(sample, generation, debug, result, metadata_list, timeout, language):
     if language == "cpp":
-        res, metadata = run_test_cpp(sample, test=generation, debug=debug, timeout=timeout)
+        res, metadata = run_test_cpp(
+            sample, test=generation, debug=debug, timeout=timeout
+        )
     else:
         res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
     result.append(res)
@@ -51,7 +53,7 @@ def check_correctness(sample, generation, timeout, debug=True, language="python"
         # consider that all tests failed
         result = [[-1 for i in range(len(in_outs["inputs"]))]]
         if debug:
-            print(f"global timeout")
+            print("global timeout")
 
     return result[0], metadata_list[0]
 
@@ -87,7 +89,9 @@ def evaluate_generations_by_problem(args):
                         print(f"Results were not True for all test cases {curr_res=}\n")
             except Exception as e:
                 if debug:
-                    print(f"Compilation failed, test framework exception = {repr(e)}{e}\n")
+                    print(
+                        f"Compilation failed, test framework exception = {repr(e)}{e}\n"
+                    )
                 # break
                 curr_metadata = {
                     "error": repr(e),
@@ -127,7 +131,9 @@ def evaluate_generations_by_problem(args):
                     print(f"\nSuccessful compilation of task {o_idx}!")
             except Exception as e:
                 if debug:
-                    print(f"Compilation failed, test framework exception = {repr(e)}{e}\n")
+                    print(
+                        f"Compilation failed, test framework exception = {repr(e)}{e}\n"
+                    )
                 # break
                 curr_metadata = {
                     "error": repr(e),
@@ -153,12 +159,12 @@ def evaluate_generations_by_problem(args):
 
 
 def evaluate_generations(
-        samples_list: list,
-        generations_list: list[list[str]],
-        debug: bool = False,
-        num_process_evaluate: int = 16,
-        timeout=6,
-        language="python"
+    samples_list: list,
+    generations_list: list[list[str]],
+    debug: bool = False,
+    num_process_evaluate: int = 16,
+    timeout=6,
+    language="python",
 ):
     """We take the list of code generations and try to compile them
      and the run their corresponding unit tests which are retrieved from the APPS dataset.
@@ -174,13 +180,16 @@ def evaluate_generations(
     # generations are code generations in the same order of the dataset
 
     inputs = [
-        [(generations_list[index], samples_list[index], debug, timeout, language), index]
+        [
+            (generations_list[index], samples_list[index], debug, timeout, language),
+            index,
+        ]
         for index in range(len(generations_list))
     ]
 
     with tqdm(total=len(inputs)) as pbar:
         with ProcessPoolExecutor(
-                max_workers=1 if debug else num_process_evaluate
+            max_workers=1 if debug else num_process_evaluate
         ) as executor:
             futures = {
                 executor.submit(evaluate_generations_by_problem, arg): index
@@ -194,22 +203,22 @@ def evaluate_generations(
                 results[index], metadata[index] = future.result()
                 pbar.update(1)
 
-    assert len(results) == len(
-        inputs
-    ), f"results = {len(results)} inputs = {len(inputs)} {results=}"
+    assert len(results) == len(inputs), (
+        f"results = {len(results)} inputs = {len(inputs)} {results=}"
+    )
     # results = {i: r for r, (_, i) in zip(results, inputs)}
 
     return results, metadata
 
 
 def codegen_metrics(
-        samples_list,
-        generations_list,
-        k_list=[1, 5, 10, 20, 40, 50, 75, 100, 125, 150, 200, 500, 1000],
-        num_process_evaluate=16,
-        timeout=6,
-        debug=False,
-        language="python"
+    samples_list,
+    generations_list,
+    k_list=[1, 5, 10, 20, 40, 50, 75, 100, 125, 150, 200, 500, 1000],
+    num_process_evaluate=16,
+    timeout=6,
+    debug=False,
+    language="python",
 ):
     samples_linear = []
     generations_linear = []
@@ -217,7 +226,7 @@ def codegen_metrics(
     results = defaultdict(list)
     metadatas = defaultdict(list)
     for idx, (sample, generation_list) in enumerate(
-            zip(samples_list, generations_list)
+        zip(samples_list, generations_list)
     ):
         assert isinstance(generation_list, list), generations_list[0]
         for generation in generation_list:
@@ -237,7 +246,7 @@ def codegen_metrics(
         debug=debug,
         num_process_evaluate=num_process_evaluate,
         timeout=timeout,
-        language=language
+        language=language,
     )
 
     for idx, sub_results in sorted(results_linear.items(), key=lambda x: x[0]):
@@ -257,9 +266,9 @@ def codegen_metrics(
         else:
             final_metadata[i] = [json.dumps(x) for x in final_metadata[i]]
 
-        assert len(final_metadata[i]) == len(
-            generations_list[0]
-        ), f"{len(final_metadata[i])=}"
+        assert len(final_metadata[i]) == len(generations_list[0]), (
+            f"{len(final_metadata[i])=}"
+        )
 
     return [metrics, results, final_metadata]
 
@@ -299,6 +308,6 @@ if __name__ == "__main__":
             "\nMOD = 998244353\n\nS = input().strip()\nn = len(S)\n\nif n % 2 != 0:\n    print(0)\n    exit()\n\n# Initialize DP table\ndp = [[0] * (n + 2) for _ in range(n + 1)]\ndp[0][0] = 1\n\nfor i in range(1, n + 1):\n    c = S[i-1]\n    for b in range(n + 1):\n        if dp[i-1][b] == 0:\n            continue\n        if c == '(':\n            new_b = b + 1\n            if new_b <= n:\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n        elif c == ')':\n            if b > 0:\n                new_b = b - 1\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n        else:  # '?'\n            # Replace with '('\n            new_b = b + 1\n            if new_b <= n:\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n            # Replace with ')'\n            if b > 0:\n                new_b = b - 1\n                dp[i][new_b] = (dp[i][new_b] + dp[i-1][b]) % MOD\n\nprint(dp[n][0] % MOD)\n",
             6,
             debug=True,
-            language="python"
+            language="python",
         )
     )
