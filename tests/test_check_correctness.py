@@ -1,5 +1,6 @@
 import json
-from livecodebench.evaluation.compute_code_generation_metrics import check_correctness
+
+from livecodebench.evaluation.code_generation_metrics import check_correctness
 
 if __name__ == "__main__":
     python_code = """
@@ -55,7 +56,7 @@ print(dp[n][0] % MOD)
             python_code,
             6,
             debug=True,
-            language="python"
+            language="python",
         )
     )
 
@@ -133,6 +134,6 @@ int main() {
             cpp_code,
             30,
             debug=True,
-            language="cpp"
+            language="cpp",
         )
     )
