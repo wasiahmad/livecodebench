@@ -6,11 +6,18 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
 
+from datasets import Value, load_dataset
+
 
 class Platform(Enum):
     LEETCODE = "leetcode"
     CODEFORCES = "codeforces"
     ATCODER = "atcoder"
+    OTHER = "other"
+
+    @classmethod
+    def _missing_(cls, value):
+        return cls.OTHER
 
 
 class Difficulty(Enum):
@@ -124,6 +131,26 @@ class CodeGenerationProblem:
         }
 
 
+def load_code_generation_dataset(
+    release_version="release_v1", language="python"
+) -> list[CodeGenerationProblem]:
+    if language == "python":
+        # we download dataset from PR: https://huggingface.co/datasets/livecodebench/code_generation_lite/tree/refs%2Fpr%2F7
+        # to avoid the restriction on datasets version (<4.0) use
+        dataset = load_dataset(
+            "livecodebench/code_generation_lite",
+            release_version,
+            split="test",
+            revision="refs/pr/7",
+        )
+    else:
+        dataset = load_dataset("nvidia/LiveCodeBench-CPP", split=release_version)
+        dataset = dataset.cast_column("contest_date", Value("string"))
+    dataset = [CodeGenerationProblem(**p, language=language) for p in dataset]  # type: ignore
+    print(f"Loaded {len(dataset)} problems")
+    return dataset
+
+
 def load_code_generation_dataset_from_file(
     filepath, language
 ) -> list[CodeGenerationProblem]:
@@ -140,3 +167,7 @@ def load_code_generation_dataset_from_file(
             dataset.append(problem)
     print(f"Loaded {len(dataset)} problems")
     return dataset
+
+
+if __name__ == "__main__":
+    dataset = load_code_generation_dataset()

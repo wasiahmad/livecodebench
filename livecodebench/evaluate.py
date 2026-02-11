@@ -1,16 +1,19 @@
 import json
 from datetime import datetime
 
-from livecodebench.benchmarks import load_code_generation_dataset_from_file
+from livecodebench.benchmarks import (
+    load_code_generation_dataset,
+    load_code_generation_dataset_from_file,
+)
 from livecodebench.evaluation import codegen_metrics, extract_instance_results
 
 
 def evaluate(
     custom_output_file: str,
-    release_version: str,
-    test_file: str,
+    release_version: str = "release_latest",
     k_list=[1],
     language: str = "python",
+    test_file: str = None,
     num_process_evaluate: int = 12,
     debug: bool = False,
     timeout: int = 6,
@@ -24,7 +27,11 @@ def evaluate(
                 output["question_id"] = output.pop("task_id")
             custom_outputs[output["question_id"]] = output
 
-    benchmark = load_code_generation_dataset_from_file(test_file, language)
+    if test_file:
+        benchmark = load_code_generation_dataset_from_file(test_file, language)
+    else:
+        benchmark = load_code_generation_dataset(release_version, language)
+
     benchmark = [
         problem for problem in benchmark if problem.question_id in custom_outputs
     ]
