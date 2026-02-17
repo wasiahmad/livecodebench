@@ -1,32 +1,28 @@
-import os
 import ast
-import json
-import sys
 import faulthandler
+import json
+import os
 import platform
-import tempfile
 import shutil
-import subprocess
-
-# used for debugging to time steps
-from datetime import datetime
 
 # to run the solution files we're using a timing based approach
 import signal
+import subprocess
+import sys
+import tempfile
+import time
 
-import numpy as np
-
+# used for debugging to time steps
+from datetime import datetime
+from decimal import Decimal
+from enum import Enum
 from io import StringIO
-
-# used for testing the code that reads from input
-from unittest.mock import patch, mock_open
 
 # from pyext import RuntimeModule
 from types import ModuleType
 
-from enum import Enum
-from decimal import Decimal
-import time
+# used for testing the code that reads from input
+from unittest.mock import mock_open, patch
 
 import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
 import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n"
@@ -40,7 +36,7 @@ def truncatefn(s, length=300):
     if len(s) <= length:
         return s
 
-    return s[: length // 2] + "...(truncated) ..." + s[-length // 2:]
+    return s[: length // 2] + "...(truncated) ..." + s[-length // 2 :]
 
 
 class CODE_TYPE(Enum):
@@ -83,7 +79,7 @@ def clean_if_name(code: str) -> str:
             condition = last_block.test
             if ast.unparse(condition).strip() == "__name__ == '__main__'":
                 code = (
-                        ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
+                    ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
                 )
     except:
         pass
@@ -112,14 +108,14 @@ def make_function(code: str) -> str:
             lineno=-1,
         )
         main_code = (
-                import_string
-                + "\n"
-                + ast.unparse(import_stmts)  # type: ignore
-                + "\n"
-                + ast.unparse(function_ast)  # type: ignore
+            import_string
+            + "\n"
+            + ast.unparse(import_stmts)  # type: ignore
+            + "\n"
+            + ast.unparse(function_ast)  # type: ignore
         )
         return main_code
-    except Exception as e:
+    except Exception:
         return code
 
 
@@ -141,7 +137,7 @@ def call_method(method, inputs):
     def _inner_call_method(_method):
         try:
             return _method()
-        except SystemExit as e:
+        except SystemExit:
             pass
         finally:
             pass
@@ -153,7 +149,7 @@ def get_function(compiled_sol, fn_name: str):  # type: ignore
     try:
         assert hasattr(compiled_sol, fn_name)
         return getattr(compiled_sol, fn_name)
-    except Exception as e:
+    except Exception:
         return
 
 
@@ -197,7 +193,7 @@ def compile_cpp_code(code: str, timeout: int):
             ["g++", cpp_file_path, "-o", executable_path],
             capture_output=True,
             text=True,
-            check=False  # Don't raise an exception on non-zero exit code
+            check=False,  # Don't raise an exception on non-zero exit code
         )
 
         if compile_process.returncode == 0:
@@ -210,7 +206,7 @@ def compile_cpp_code(code: str, timeout: int):
         print(f"Compilation timed out after {timeout} seconds.")
         return None
 
-    except Exception as e:
+    except Exception:
         return None
 
     finally:
@@ -238,7 +234,7 @@ def get_stripped_lines(val: str):
 
 
 def grade_call_based(
-        code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
+    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
 ):
     # call-based clean up logic
     # need to wrap in try-catch logic after to catch the correct errors, but for now this is fine.
@@ -319,16 +315,13 @@ def grade_call_based(
 
 
 def grade_call_based_cpp(
-        code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
+    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
 ):
     assert len(all_inputs) == 1 and len(all_outputs) == 1 and all_outputs[0] == ""
     code = import_string_cpp + "\n\n" + code + "\n\n" + all_inputs[0]
     temp_dir = compile_cpp_code(code, timeout)
     if temp_dir is None:
-        return [False], {
-            "error_code": -1,
-            "error_message": "Compilation failed"
-        }
+        return [False], {"error_code": -1, "error_message": "Compilation failed"}
 
     executable_path = f"{temp_dir}/solution"
     all_results = []
@@ -340,7 +333,7 @@ def grade_call_based_cpp(
         faulthandler.enable()
         start_time = time.time()
 
-        max_memory_bytes = 8 * (1024 ** 3)
+        max_memory_bytes = 8 * (1024**3)
         process = subprocess.run(
             [executable_path],
             capture_output=False,  # we don't need stdout and stderr
@@ -348,7 +341,7 @@ def grade_call_based_cpp(
             check=False,  # Do not raise exception on non-zero exit
             preexec_fn=lambda: set_memory_limit(max_memory_bytes),
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
         # max memory is set to 8GB
@@ -371,10 +364,7 @@ def grade_call_based_cpp(
             all_results.append(True)
         else:
             all_results.append(-2)
-            return all_results, {
-                "error_code": -2,
-                "error_message": "Wrong Answer"
-            }
+            return all_results, {"error_code": -2, "error_message": "Wrong Answer"}
 
     except TimeoutError as e:
         signal.alarm(0)
@@ -382,7 +372,7 @@ def grade_call_based_cpp(
         return all_results, {
             "error": repr(e),
             "error_code": -3,
-            "error_message": "Time Limit Exceeded"
+            "error_message": "Time Limit Exceeded",
         }
 
     except MemoryError as e:
@@ -391,7 +381,7 @@ def grade_call_based_cpp(
         return all_results, {
             "error": repr(e),
             "error_code": -5,
-            "error_message": "Memory Limit Exceeded"
+            "error_message": "Memory Limit Exceeded",
         }
 
     except Exception as e:
@@ -399,7 +389,7 @@ def grade_call_based_cpp(
         return all_results, {
             "error": repr(e),
             "error_code": -4,
-            "error_message": "Runtime Error"
+            "error_message": "Runtime Error",
         }
 
     finally:
@@ -420,10 +410,10 @@ def grade_call_based_cpp(
 
 
 def grade_stdio(
-        code: str,
-        all_inputs: list,
-        all_outputs: list,
-        timeout: int,
+    code: str,
+    all_inputs: list,
+    all_outputs: list,
+    timeout: int,
 ):
     ## runtime doesn't interact well with __name__ == '__main__'
     code = clean_if_name(code)
@@ -499,8 +489,8 @@ def grade_stdio(
             return all_results, WA_send_args
 
         for output_line_idx, (
-                stripped_prediction_line,
-                stripped_gt_out_line,
+            stripped_prediction_line,
+            stripped_gt_out_line,
         ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
             WA_send_args["error_message"] = (
                 f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
@@ -538,17 +528,14 @@ def grade_stdio(
 
 
 def grade_stdio_cpp(
-        code: str,
-        all_inputs: list,
-        all_outputs: list,
-        timeout: int,
+    code: str,
+    all_inputs: list,
+    all_outputs: list,
+    timeout: int,
 ):
     temp_dir = compile_cpp_code(code, timeout)
     if temp_dir is None:
-        return [False], {
-            "error_code": -1,
-            "error_message": "Compilation failed"
-        }
+        return [False], {"error_code": -1, "error_message": "Compilation failed"}
 
     executable_path = f"{temp_dir}/solution"
     all_results = []
@@ -564,14 +551,14 @@ def grade_stdio_cpp(
                 start_time = time.time()
 
                 # max memory is set to 8GB
-                max_memory_bytes = 8 * (1024 ** 3)
+                max_memory_bytes = 8 * (1024**3)
                 process = subprocess.run(
                     [executable_path],
                     input=input_str,
                     capture_output=True,
                     text=True,
                     check=False,
-                    preexec_fn=lambda: set_memory_limit(max_memory_bytes)
+                    preexec_fn=lambda: set_memory_limit(max_memory_bytes),
                 )
                 actual_output = process.stdout.strip()
 
@@ -600,7 +587,7 @@ def grade_stdio_cpp(
                 if not has_passed:
                     return all_results, {
                         "error_code": -2,
-                        "error_message": "Wrong Answer"
+                        "error_message": "Wrong Answer",
                     }
 
             except TimeoutError as e:
@@ -609,7 +596,7 @@ def grade_stdio_cpp(
                 return all_results, {
                     "error": repr(e),
                     "error_code": -3,
-                    "error_message": "Time Limit Exceeded"
+                    "error_message": "Time Limit Exceeded",
                 }
 
             except MemoryError as e:
@@ -618,7 +605,7 @@ def grade_stdio_cpp(
                 return all_results, {
                     "error": repr(e),
                     "error_code": -5,
-                    "error_message": "Memory Limit Exceeded"
+                    "error_message": "Memory Limit Exceeded",
                 }
 
             except Exception as e:
@@ -626,7 +613,7 @@ def grade_stdio_cpp(
                 return all_results, {
                     "error": repr(e),
                     "error_code": -4,
-                    "error_message": "Runtime Error"
+                    "error_message": "Runtime Error",
                 }
 
         return all_results, {"execution time": total_execution_time}
@@ -779,7 +766,7 @@ def run_test_cpp(sample, test=None, debug=False, timeout=30):
             except Exception as e:
                 return [-4], {
                     "error_code": -4,
-                    "error_message": f"Error during testing: {e}"
+                    "error_message": f"Error during testing: {e}",
                 }
             finally:
                 signal.alarm(0)
@@ -797,7 +784,7 @@ def run_test_cpp(sample, test=None, debug=False, timeout=30):
             except Exception as e:
                 return [-4], {
                     "error_code": -4,
-                    "error_message": f"Error during testing: {e}"
+                    "error_message": f"Error during testing: {e}",
                 }
             finally:
                 signal.alarm(0)
@@ -878,7 +865,10 @@ def reliability_guard(maximum_memory_bytes=None):
 
     subprocess.Popen = None  # type: ignore
 
-    __builtins__["help"] = None
+    if isinstance(__builtins__, dict):
+        __builtins__["help"] = None
+    else:
+        __builtins__.help = None
 
     import sys
 
@@ -893,9 +883,7 @@ def set_memory_limit(maximum_memory_bytes):
     assert maximum_memory_bytes is not None
     import resource
 
-    resource.setrlimit(
-        resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes)
-    )
+    resource.setrlimit(resource.RLIMIT_AS, (maximum_memory_bytes, maximum_memory_bytes))
     resource.setrlimit(
         resource.RLIMIT_DATA, (maximum_memory_bytes, maximum_memory_bytes)
     )
