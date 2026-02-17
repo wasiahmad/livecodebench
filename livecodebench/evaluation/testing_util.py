@@ -865,7 +865,10 @@ def reliability_guard(maximum_memory_bytes=None):
 
     subprocess.Popen = None  # type: ignore
 
-    __builtins__.help = None
+    if isinstance(__builtins__, dict):
+        __builtins__["help"] = None
+    else:
+        __builtins__.help = None
 
     import sys
 
