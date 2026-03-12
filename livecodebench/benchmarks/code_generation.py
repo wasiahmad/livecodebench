@@ -6,6 +6,14 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
 
+import pyarrow as pa
+
+try:
+    if not hasattr(pa, 'PyExtensionType'):
+        pa.PyExtensionType = pa.ExtensionType
+except (AttributeError, NameError):
+    pass
+
 from datasets import Value, load_dataset
 
 
