@@ -573,10 +573,8 @@ def grade_stdio(
                 continue
 
             ## Fallback: whitespace-separated tokens as Decimals (non-JSON lines)
-            ## if there are floating elements
-            ## use `decimal` library for good floating point comparision
-            ## otherwise gotcha: np.isclose(50000000000000000, 50000000000000001) = True
-            ## note that we should always be able to convert to decimals
+            ## Exact Decimal equality first (avoids float/allclose pitfalls on huge ints).
+            ## Then Nemotron-style float token equality + np.allclose for near-miss floats.
 
             success, decimal_prediction_line = convert_line_to_decimals(
                 stripped_prediction_line
@@ -591,6 +589,15 @@ def grade_stdio(
 
             if decimal_prediction_line == decimal_gtout_line:
                 continue
+
+            try:
+                if len(decimal_prediction_line) == len(decimal_gtout_line):
+                    pred_f = [float(d) for d in decimal_prediction_line]
+                    gt_f = [float(d) for d in decimal_gtout_line]
+                    if pred_f == gt_f or np.allclose(pred_f, gt_f):
+                        continue
+            except (TypeError, ValueError, OverflowError):
+                pass
 
             all_results.append(-2)
             return all_results, WA_send_args
