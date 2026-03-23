@@ -2,6 +2,8 @@ import ast
 import faulthandler
 import json
 import os
+
+import numpy as np
 import platform
 import shutil
 
@@ -70,6 +72,36 @@ class Capturing(list):
         del self._stringio  # free up some memory
         sys.stdout = self._stdout
 
+class MockStdinWithBuffer:
+    def __init__(self, inputs: str):
+        self.inputs = inputs
+        self._stringio = StringIO(inputs)
+        self.buffer = MockBuffer(inputs)
+
+    def read(self, *args):
+        return self.inputs
+
+    def readline(self, *args):
+        return self._stringio.readline(*args)
+
+    def readlines(self, *args):
+        return self.inputs.split("\n")
+
+    def __getattr__(self, name):
+        # Delegate other attributes to StringIO
+        return getattr(self._stringio, name)
+
+
+class MockBuffer:
+    def __init__(self, inputs: str):
+        self.inputs = inputs.encode("utf-8")  # Convert to bytes
+
+    def read(self, *args):
+        # Return as byte strings that can be split
+        return self.inputs
+
+    def readline(self, *args):
+        return self.inputs.split(b"\n")[0] + b"\n"
 
 def clean_if_name(code: str) -> str:
     try:
@@ -81,7 +113,7 @@ def clean_if_name(code: str) -> str:
                 code = (
                     ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
                 )
-    except:
+    except Exception:
         pass
 
     return code
@@ -125,11 +157,14 @@ def call_method(method, inputs):
 
     inputs_line_iterator = iter(inputs.split("\n"))
 
+    # Create custom stdin mock with buffer support
+    mock_stdin = MockStdinWithBuffer(inputs)
+
     # sys.setrecursionlimit(10000)
 
     # @patch('builtins.input', side_effect=inputs.split("\n"))
     @patch("builtins.open", mock_open(read_data=inputs))
-    @patch("sys.stdin", StringIO(inputs))
+    @patch("sys.stdin", mock_stdin)  # Use our custom mock instead of StringIO
     @patch("sys.stdin.readline", lambda *args: next(inputs_line_iterator))
     @patch("sys.stdin.readlines", lambda *args: inputs.split("\n"))
     @patch("sys.stdin.read", lambda *args: inputs)
@@ -163,7 +198,7 @@ def compile_code(code: str, timeout: int):
             # this is a hack to check if it is leetcode solution or not
             # currently livecodebench only supports LeetCode but
             # else condition allows future extensibility to other platforms
-            compiled_sol = tmp_sol.Solution()
+            compiled_sol = tmp_sol.Solution()  # pylint: disable=no-member
         else:
             # do nothing in the other case since function is accessible
             compiled_sol = tmp_sol
@@ -221,7 +256,7 @@ def compile_cpp_code(code: str, timeout: int):
 def convert_line_to_decimals(line: str) -> tuple[bool, list[Decimal]]:
     try:
         decimal_line = [Decimal(elem) for elem in line.split()]
-    except:
+    except Exception:
         return False, []
     return True, decimal_line
 
@@ -231,6 +266,44 @@ def get_stripped_lines(val: str):
     val = val.strip()
 
     return [val_line.strip() for val_line in val.split("\n")]
+
+
+def match_outputs(prediction, gt_out) -> bool:
+    """True if prediction matches gt_out by exact equality, JSON serialization, or np.allclose."""
+    if prediction == gt_out:
+        return True
+    try:
+        if json.dumps(prediction) == json.dumps(gt_out):
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        if np.allclose(float(prediction), float(gt_out)):
+            return True
+    except (TypeError, ValueError, OverflowError):
+        pass
+    if isinstance(prediction, list):
+        try:
+            if len(prediction) == len(gt_out):
+                for i in range(len(prediction)):
+                    if not np.allclose(float(prediction[i]), float(gt_out[i])):
+                        return False
+                return True
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return False
+
+
+def stdio_line_matches_with_match_outputs(pred_line: str, gt_line: str) -> bool:
+    """Compare one stdout line to expected: exact string, or JSON-parse both and use match_outputs."""
+    if pred_line == gt_line:
+        return True
+    try:
+        pred_v = json.loads(pred_line)
+        gt_v = json.loads(gt_line)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    return match_outputs(pred_v, gt_v)
 
 
 def grade_call_based(
@@ -272,9 +345,7 @@ def grade_call_based(
             if isinstance(prediction, tuple):
                 prediction = list(prediction)
 
-            tmp_result = prediction == gt_out
-
-            # handle floating point comparisons
+            tmp_result = match_outputs(prediction, gt_out)
 
             all_results.append(tmp_result)
 
@@ -496,15 +567,14 @@ def grade_stdio(
                 f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
             )
 
-            ## CASE 1: exact match
-            if stripped_prediction_line == stripped_gt_out_line:
+            if stdio_line_matches_with_match_outputs(
+                stripped_prediction_line, stripped_gt_out_line
+            ):
                 continue
 
-            ## CASE 2: element-wise comparision
-            ## if there are floating elements
-            ## use `decimal` library for good floating point comparision
-            ## otherwise gotcha: np.isclose(50000000000000000, 50000000000000001) = True
-            ## note that we should always be able to convert to decimals
+            ## Fallback: whitespace-separated tokens as Decimals (non-JSON lines)
+            ## Exact Decimal equality first (avoids float/allclose pitfalls on huge ints).
+            ## Then Nemotron-style float token equality + np.allclose for near-miss floats.
 
             success, decimal_prediction_line = convert_line_to_decimals(
                 stripped_prediction_line
@@ -519,6 +589,15 @@ def grade_stdio(
 
             if decimal_prediction_line == decimal_gtout_line:
                 continue
+
+            try:
+                if len(decimal_prediction_line) == len(decimal_gtout_line):
+                    pred_f = [float(d) for d in decimal_prediction_line]
+                    gt_f = [float(d) for d in decimal_gtout_line]
+                    if pred_f == gt_f or np.allclose(pred_f, gt_f):
+                        continue
+            except (TypeError, ValueError, OverflowError):
+                pass
 
             all_results.append(-2)
             return all_results, WA_send_args
@@ -649,9 +728,8 @@ def run_test(sample, test=None, debug=False, timeout=6):
 
     try:
         in_outs = json.loads(sample["input_output"])
-    except ValueError as e:
-        raise e
-        in_outs = None
+    except ValueError:
+        raise
 
     if in_outs:
         if in_outs.get("fn_name") is None:
@@ -670,8 +748,12 @@ def run_test(sample, test=None, debug=False, timeout=6):
         return in_outs, {"error": "no test code provided"}
 
     elif test is not None:
-        results = []
-        sol = import_string
+        if not in_outs:
+            return [-4], {
+                "error_code": -4,
+                "error_message": "Invalid or empty input_output",
+            }
+
         if debug:
             print(f"loading test code = {datetime.now().time()}")
 
@@ -728,9 +810,8 @@ def run_test_cpp(sample, test=None, debug=False, timeout=30):
 
     try:
         in_outs = json.loads(sample["input_output"])
-    except ValueError as e:
-        raise e
-        in_outs = None
+    except ValueError:
+        raise
 
     if in_outs:
         if in_outs.get("fn_name") is None:
@@ -749,6 +830,12 @@ def run_test_cpp(sample, test=None, debug=False, timeout=30):
         return in_outs, {"error": "no test code provided"}
 
     elif test is not None:
+        if not in_outs:
+            return [-4], {
+                "error_code": -4,
+                "error_message": "Invalid or empty input_output",
+            }
+
         if debug:
             print(f"loading test code = {datetime.now().time()}")
 
