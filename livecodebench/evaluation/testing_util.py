@@ -29,11 +29,12 @@ from unittest.mock import mock_open, patch
 import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
 import_string_cpp = "#include <bits/stdc++.h>\nusing namespace std;\n"
 
+# Subprocess memory cap for compiled C++ solutions (8 GiB).
+_CPP_SUBPROCESS_MEMORY_BYTES = 8 * (1024**3)
+
 
 def truncatefn(s, length=300):
-    if isinstance(s, str):
-        pass
-    else:
+    if not isinstance(s, str):
         s = str(s)
     if len(s) <= length:
         return s
@@ -155,26 +156,25 @@ def call_method(method, inputs):
     if isinstance(inputs, list):
         inputs = "\n".join(inputs)
 
-    inputs_line_iterator = iter(inputs.split("\n"))
+    input_lines = inputs.split("\n")
+    inputs_line_iterator = iter(input_lines)
 
     # Create custom stdin mock with buffer support
     mock_stdin = MockStdinWithBuffer(inputs)
 
     # sys.setrecursionlimit(10000)
 
-    # @patch('builtins.input', side_effect=inputs.split("\n"))
+    # @patch('builtins.input', side_effect=input_lines)
     @patch("builtins.open", mock_open(read_data=inputs))
     @patch("sys.stdin", mock_stdin)  # Use our custom mock instead of StringIO
     @patch("sys.stdin.readline", lambda *args: next(inputs_line_iterator))
-    @patch("sys.stdin.readlines", lambda *args: inputs.split("\n"))
+    @patch("sys.stdin.readlines", lambda *args: input_lines)
     @patch("sys.stdin.read", lambda *args: inputs)
     # @patch('sys.stdout.write', print)
     def _inner_call_method(_method):
         try:
             return _method()
         except SystemExit:
-            pass
-        finally:
             pass
 
     return _inner_call_method(method)
@@ -306,6 +306,79 @@ def stdio_line_matches_with_match_outputs(pred_line: str, gt_line: str) -> bool:
     return match_outputs(pred_v, gt_v)
 
 
+def compare_stdio_multiline_to_expected(
+    prediction: str, gt_out: str
+) -> tuple[bool, dict | None]:
+    """Line-by-line stdout vs expected, same rules as grade_stdio (Python).
+
+    Uses get_stripped_lines, stdio_line_matches_with_match_outputs, then
+    Decimal token equality and float/np.allclose fallback.
+    On mismatch, returns (False, metadata dict with error_code -2 and fields
+    for output, expected, error_message). On match, (True, None).
+    """
+    stripped_prediction_lines = get_stripped_lines(prediction)
+    stripped_gt_out_lines = get_stripped_lines(gt_out)
+    if len(stripped_prediction_lines) != len(stripped_gt_out_lines):
+        return False, {
+            "output": truncatefn(prediction),
+            "expected": truncatefn(gt_out),
+            "error_code": -2,
+            "error_message": "Wrong answer: mismatched output length",
+        }
+
+    # Build truncated metadata only if a line fails (hot path: all correct).
+    wa_send_args: dict | None = None
+
+    def _wrong_answer_meta() -> dict:
+        nonlocal wa_send_args
+        if wa_send_args is None:
+            wa_send_args = {
+                "output": truncatefn(prediction),
+                "expected": truncatefn(gt_out),
+                "error_code": -2,
+            }
+        return wa_send_args
+
+    for output_line_idx, (
+        stripped_prediction_line,
+        stripped_gt_out_line,
+    ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
+        if stdio_line_matches_with_match_outputs(
+            stripped_prediction_line, stripped_gt_out_line
+        ):
+            continue
+
+        meta = _wrong_answer_meta()
+        meta["error_message"] = (
+            f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
+        )
+
+        success, decimal_prediction_line = convert_line_to_decimals(
+            stripped_prediction_line
+        )
+        if not success:
+            return False, meta
+        success, decimal_gtout_line = convert_line_to_decimals(stripped_gt_out_line)
+        if not success:
+            return False, meta
+
+        if decimal_prediction_line == decimal_gtout_line:
+            continue
+
+        try:
+            if len(decimal_prediction_line) == len(decimal_gtout_line):
+                pred_f = [float(d) for d in decimal_prediction_line]
+                gt_f = [float(d) for d in decimal_gtout_line]
+                if pred_f == gt_f or np.allclose(pred_f, gt_f):
+                    continue
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+        return False, meta
+
+    return True, None
+
+
 def grade_call_based(
     code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
 ):
@@ -404,28 +477,15 @@ def grade_call_based_cpp(
         faulthandler.enable()
         start_time = time.time()
 
-        max_memory_bytes = 8 * (1024**3)
         process = subprocess.run(
             [executable_path],
             capture_output=False,  # we don't need stdout and stderr
             text=True,
             check=False,  # Do not raise exception on non-zero exit
-            preexec_fn=lambda: set_memory_limit(max_memory_bytes),
+            preexec_fn=lambda: set_memory_limit(_CPP_SUBPROCESS_MEMORY_BYTES),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-
-        # max memory is set to 8GB
-        # max_memory_bytes = 8 * (1024 ** 3)
-        # process = subprocess.Popen(
-        #     [executable_path],
-        #     stdin=subprocess.PIPE,
-        #     stdout=subprocess.PIPE,
-        #     stderr=subprocess.PIPE,
-        #     text=True,
-        #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
-        # )
-        # stdout, stderr = process.communicate()
 
         end_time = time.time()
         total_execution += end_time - start_time
@@ -507,7 +567,6 @@ def grade_stdio(
         signal.alarm(timeout)
         faulthandler.enable()
 
-        signal.alarm(timeout)
         with Capturing() as captured_output:
             try:
                 start = time.time()
@@ -542,66 +601,13 @@ def grade_stdio(
 
         prediction = captured_output[0]
 
-        stripped_prediction_lines = get_stripped_lines(prediction)
-        stripped_gt_out_lines = get_stripped_lines(gt_out)
-
-        ## WA happens in multiple circumstances
-        ## so cache the return to make it clean!
-        WA_send_args = {
-            "output": truncatefn(prediction),
-            "inputs": truncatefn(gt_inp),
-            "expected": truncatefn(gt_out),
-            "error_code": -2,
-        }
-
-        if len(stripped_prediction_lines) != len(stripped_gt_out_lines):
+        ok, wa = compare_stdio_multiline_to_expected(prediction, gt_out)
+        if ok:
+            all_results.append(True)
+        else:
+            wa["inputs"] = truncatefn(gt_inp)
             all_results.append(-2)
-            WA_send_args["error_message"] = "Wrong answer: mismatched output length"
-            return all_results, WA_send_args
-
-        for output_line_idx, (
-            stripped_prediction_line,
-            stripped_gt_out_line,
-        ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
-            WA_send_args["error_message"] = (
-                f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
-            )
-
-            if stdio_line_matches_with_match_outputs(
-                stripped_prediction_line, stripped_gt_out_line
-            ):
-                continue
-
-            ## Fallback: whitespace-separated tokens as Decimals (non-JSON lines)
-            ## Exact Decimal equality first (avoids float/allclose pitfalls on huge ints).
-            ## Then Nemotron-style float token equality + np.allclose for near-miss floats.
-
-            success, decimal_prediction_line = convert_line_to_decimals(
-                stripped_prediction_line
-            )
-            if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
-            success, decimal_gtout_line = convert_line_to_decimals(stripped_gt_out_line)
-            if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
-
-            if decimal_prediction_line == decimal_gtout_line:
-                continue
-
-            try:
-                if len(decimal_prediction_line) == len(decimal_gtout_line):
-                    pred_f = [float(d) for d in decimal_prediction_line]
-                    gt_f = [float(d) for d in decimal_gtout_line]
-                    if pred_f == gt_f or np.allclose(pred_f, gt_f):
-                        continue
-            except (TypeError, ValueError, OverflowError):
-                pass
-
-            all_results.append(-2)
-            return all_results, WA_send_args
-        all_results.append(True)
+            return all_results, wa
 
     return all_results, {"execution time": total_execution_time}
 
@@ -625,49 +631,45 @@ def grade_stdio_cpp(
         signal.alarm(timeout)
         faulthandler.enable()
         for i, input_str in enumerate(all_inputs):
-            expected_output = all_outputs[i].strip()
+            gt_out = all_outputs[i]
             try:
                 start_time = time.time()
 
-                # max memory is set to 8GB
-                max_memory_bytes = 8 * (1024**3)
                 process = subprocess.run(
                     [executable_path],
                     input=input_str,
                     capture_output=True,
                     text=True,
                     check=False,
-                    preexec_fn=lambda: set_memory_limit(max_memory_bytes),
+                    preexec_fn=lambda: set_memory_limit(_CPP_SUBPROCESS_MEMORY_BYTES),
                 )
-                actual_output = process.stdout.strip()
-
-                # max memory is set to 8GB
-                # max_memory_bytes = 8 * (1024 ** 3)
-                # process = subprocess.Popen(
-                #     [executable_path],
-                #     stdin=subprocess.PIPE,
-                #     stdout=subprocess.PIPE,
-                #     stderr=subprocess.PIPE,
-                #     text=True,
-                #     preexec_fn=lambda: set_memory_limit(max_memory_bytes)
-                # )
-                # process.stdin.write(input_str)
-                # process.stdin.close()
-                # stdout, stderr = process.communicate()
-                # actual_output = stdout.strip()
+                actual_output = process.stdout if process.stdout is not None else ""
 
                 end_time = time.time()
                 execution_time = end_time - start_time
                 total_execution_time += execution_time
                 signal.alarm(0)
 
-                has_passed = True if actual_output == expected_output else False
-                all_results.append(has_passed)
-                if not has_passed:
+                if process.returncode != 0:
+                    all_results.append(-4)
                     return all_results, {
-                        "error_code": -2,
-                        "error_message": "Wrong Answer",
+                        "error_code": -4,
+                        "error_message": "Runtime Error",
+                        "error": truncatefn(
+                            (process.stderr or "").strip()
+                            or f"exit {process.returncode}"
+                        ),
+                        "inputs": truncatefn(input_str),
+                        "expected": truncatefn(gt_out),
                     }
+
+                ok, wa = compare_stdio_multiline_to_expected(actual_output, gt_out)
+                if ok:
+                    all_results.append(True)
+                else:
+                    wa["inputs"] = truncatefn(input_str)
+                    all_results.append(-2)
+                    return all_results, wa
 
             except TimeoutError as e:
                 signal.alarm(0)
