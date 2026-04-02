@@ -20,9 +20,12 @@ from livecodebench.evaluation.testing_util import run_test
 
 
 def _temp_run(sample, generation, debug, result, metadata_list, timeout, language):
-    res, metadata = run_test(
-        sample, test=generation, debug=debug, timeout=timeout, language=language
-    )
+    if language == "cpp":
+        res, metadata = run_test_cpp(
+            sample, test=generation, debug=debug, timeout=timeout
+        )
+    else:
+        res, metadata = run_test(sample, test=generation, debug=debug, timeout=timeout)
     result.append(res)
     metadata_list.append(metadata)
 
