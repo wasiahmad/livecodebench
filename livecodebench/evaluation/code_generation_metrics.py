@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from livecodebench.evaluation.pass_k_utils import compute_metrics_from_results
-from livecodebench.evaluation.testing_util import run_test
+from livecodebench.evaluation.testing_util import run_test, run_test_cpp
 
 
 def _temp_run(sample, generation, debug, result, metadata_list, timeout, language):
