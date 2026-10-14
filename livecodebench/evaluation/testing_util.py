@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 
 # from pyext import RuntimeModule
 from types import ModuleType
@@ -60,17 +60,25 @@ def timeout_handler(signum, frame):
 # from https://stackoverflow.com/a/16571630/6416660
 # alternative use redirect_stdout() from contextlib
 class Capturing(list):
+    # A text wrapper over a byte buffer, so sys.stdout.buffer exists and text and binary
+    # writes land in the same stream, in order.
     def __enter__(self):
         self._stdout = sys.stdout
-        sys.stdout = self._stringio = StringIO()
-        # Make closing the StringIO a no-op
-        self._stringio.close = lambda x: 1
+        self._bytes_buffer = BytesIO()
+        self._stringio = TextIOWrapper(
+            self._bytes_buffer, encoding="utf-8", newline="", write_through=True
+        )
+        # Make closing the stream a no-op
+        self._stringio.close = lambda *args, **kwargs: None
+        sys.stdout = self._stringio
         return self
 
     def __exit__(self, *args):
-        self.append(self._stringio.getvalue())
-        del self._stringio  # free up some memory
+        self._stringio.flush()
+        self.append(self._bytes_buffer.getvalue().decode("utf-8", errors="replace"))
         sys.stdout = self._stdout
+        del self._stringio  # free up some memory
+        del self._bytes_buffer
 
 class MockStdinWithBuffer:
     def __init__(self, inputs: str):
@@ -87,21 +95,23 @@ class MockStdinWithBuffer:
     def readlines(self, *args):
         return self.inputs.split("\n")
 
+    # Dunder methods are looked up on the type, so __getattr__ does not make this iterable.
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._stringio)
+
     def __getattr__(self, name):
         # Delegate other attributes to StringIO
         return getattr(self._stringio, name)
 
 
-class MockBuffer:
+class MockBuffer(BytesIO):
+    # sys.stdin.buffer: a real byte stream, so read(), readline(), readlines() and iteration
+    # consume the input in order, as they do on a real interpreter.
     def __init__(self, inputs: str):
-        self.inputs = inputs.encode("utf-8")  # Convert to bytes
-
-    def read(self, *args):
-        # Return as byte strings that can be split
-        return self.inputs
-
-    def readline(self, *args):
-        return self.inputs.split(b"\n")[0] + b"\n"
+        super().__init__(inputs.encode("utf-8"))
 
 def clean_if_name(code: str) -> str:
     try:
